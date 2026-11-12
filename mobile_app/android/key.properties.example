@@ -1,0 +1,7 @@
+# Release Keystore Configuration for Google Play
+# DO NOT commit real key.properties to source control!
+# Fill in your values after generating upload-keystore.jks:
+storePassword=your_keystore_password
+keyPassword=your_key_password
+keyAlias=upload
+storeFile=../upload-keystore.jks

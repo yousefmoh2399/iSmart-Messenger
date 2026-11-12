@@ -1,6 +1,6 @@
 {
     "name":  "ismart-messenger-electron",
-    "version":  "1.1.15",
+    "version":  "1.1.24",
     "private":  true,
     "description":  "Electron wrapper for iSmart Messenger web build",
     "main":  "main.js",
@@ -16,12 +16,15 @@
                   "appId":  "com.ismart.messenger.webwrapper",
                   "productName":  "iSmart Messenger",
                   "asar":  true,
+                  "compression":  "maximum",
+                  "afterPack":  "./afterPack.js",
                   "directories":  {
                                       "output":  "dist",
                                       "buildResources":  "build"
                                   },
                   "files":  [
                                 "main.js",
+                                "updater_helpers.js",
                                 "preload.js",
                                 "receive-preload.js",
                                 "printing/**/*",
@@ -30,7 +33,12 @@
                                     "from":  "../build/web",
                                     "to":  "web",
                                     "filter":  [
-                                                   "**/*"
+                                                   "**/*",
+                                                   "!.*",
+                                                   "!**/*.symbols",
+                                                   "!canvaskit/skwasm*",
+                                                   "!canvaskit/wimp*",
+                                                   "!canvaskit/experimental_webparagraph*"
                                                ]
                                 }
                             ],
@@ -38,6 +46,10 @@
                                          {
                                              "from":  "build/icon.ico",
                                              "to":  "build/icon.ico"
+                                         },
+                                         {
+                                             "from":  "clip_helper.exe",
+                                             "to":  "clip_helper.exe"
                                          }
                                      ],
                   "win":  {
@@ -53,9 +65,9 @@
                               "requestedExecutionLevel":  "asInvoker"
                           },
                   "nsis":  {
-                               "oneClick":  false,
+                               "oneClick":  true,
                                "perMachine":  false,
-                               "allowToChangeInstallationDirectory":  true,
+                               "allowToChangeInstallationDirectory":  false,
                                "createDesktopShortcut":  true,
                                "createStartMenuShortcut":  true,
                                "shortcutName":  "iSmart Messenger",

@@ -3,7 +3,10 @@ const { body, param } = require("express-validator");
 const ApiError = require("../utils/api-error");
 const {
   getUsers,
+  exportUsersHandler,
   createManagedUser,
+  batchGenerateBranchUsersHandler,
+  getBatchJobTemplatesHandler,
   updateManagedUser,
   updateManagedUserStatus,
   resetManagedUserPassword,
@@ -65,6 +68,7 @@ router.put(
       .trim()
       .isLength({ min: 2, max: 120 })
       .withMessage("الاسم يجب أن يكون بين 2 و120 حرفًا."),
+    body("jobTitle").optional().isString().trim().isLength({ max: 150 }),
     body("password")
       .optional()
       .isLength({ min: 6 })
@@ -72,8 +76,11 @@ router.put(
     body("chatPreferences").optional().isObject(),
     body("chatPreferences.themeId").optional().isString(),
     body("chatPreferences.wallpaperId").optional().isString(),
+    body("chatPreferences.doodles").optional().isBoolean(),
+    body("chatPreferences.unreadBadgeColorHex").optional().isString(),
     body("chatPreferences.customTheme").optional().isObject(),
     body("chatPreferences.customTheme.accentColorHex").optional().isString(),
+    body("chatPreferences.customTheme.unreadBadgeColorHex").optional().isString(),
     body("chatPreferences.customTheme.incomingBubbleColorHex")
       .optional()
       .isString(),
@@ -127,7 +134,24 @@ router.delete(
   unregisterMyPushDevice,
 );
 
+router.get("/export", requireUserManagementRead, exportUsersHandler);
+router.get("/batch-templates", requireUserManagementRead, getBatchJobTemplatesHandler);
 router.get("/", requireUserManagementRead, getUsers);
+
+router.post(
+  "/batch-generate",
+  requirePermission("canCreateUsers"),
+  [
+    body("branchId").isMongoId().withMessage("معرّف الفرع غير صالح."),
+    body("items").isArray().withMessage("قائمة الوظائف والأعداد يجب أن تكون مصفوفة."),
+    body("defaultPassword")
+      .optional()
+      .isLength({ min: 6 })
+      .withMessage("كلمة المرور يجب ألا تقل عن 6 أحرف."),
+  ],
+  validateRequest,
+  batchGenerateBranchUsersHandler,
+);
 
 router.post(
   "/",

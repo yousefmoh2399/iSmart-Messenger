@@ -212,6 +212,7 @@ class TicketSupportUser {
     required this.role,
     required this.departmentId,
     required this.isSupportAgent,
+    this.exportTicketTypes = const <String>[],
   });
 
   final String id;
@@ -220,6 +221,7 @@ class TicketSupportUser {
   final String role;
   final String? departmentId;
   final bool isSupportAgent;
+  final List<String> exportTicketTypes;
 
   String get displayName => fullName.trim().isNotEmpty ? fullName : username;
 
@@ -231,6 +233,10 @@ class TicketSupportUser {
       role: json['role']?.toString() ?? 'user',
       departmentId: json['departmentId']?.toString(),
       isSupportAgent: json['isSupportAgent'] == true,
+      exportTicketTypes: ((json['exportTicketTypes'] as List<dynamic>?) ??
+              const <dynamic>[])
+          .map((item) => item.toString())
+          .toList(),
     );
   }
 }

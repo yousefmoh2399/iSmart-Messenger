@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Mobile App</string>
+	<string>iSmart Messenger</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -13,7 +13,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>mobile_app</string>
+	<string>iSmart Messenger</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -24,14 +24,21 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
-	<string>يحتاج التطبيق إلى الكاميرا لمسح المستندات وأكواد QR وBarcode الخاصة بأصول IT والجرد.</string>
+	<string>يحتاج التطبيق إلى الكاميرا لمسح المستندات ضوئيًا وقراءة أكواد QR والباركود. / Camera access is required to scan documents and QR codes.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>يحتاج التطبيق إلى الوصول للصور حتى تتمكن من استيراد مستند من المعرض أثناء المسح.</string>
+	<string>يحتاج التطبيق للوصول إلى الصور لاختيار المستندات وإرسال المرفقات في المحادثة. / Photo library access is required to attach images and scan documents from gallery.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>يحتاج التطبيق إلى إذن الصور لإدارة صفحات المستندات المستوردة أثناء المسح.</string>
+	<string>يحتاج التطبيق لإذن حفظ المستندات والصور الممسوحة في مكتبة الصور. / Photo library permission is required to save scanned documents and photos.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>يحتاج التطبيق إلى إذن الميكروفون لتسجيل الملاحظات الصوتية داخل المحادثة.</string>
+	<string>يحتاج التطبيق إلى إذن الميكروفون لتسجيل الرسائل الصوتية داخل المحادثة. / Microphone access is required to record voice notes in chat.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/network/media_url_resolver.dart';
@@ -15,6 +17,11 @@ import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../auth/data/auth_repository.dart';
 import '../models/chat_models.dart';
 import 'chat_local_cache.dart';
+import 'chat_socket_service.dart';
+
+// Top-level function required by compute() — must not be a closure or instance method.
+// Computes SHA-256 of raw bytes in a background isolate to avoid blocking the UI thread.
+String _computeSha256Bytes(Uint8List bytes) => sha256.convert(bytes).toString();
 
 class ChatRepository {
   ChatRepository(
@@ -22,8 +29,9 @@ class ChatRepository {
     this._authRepository,
     this._localStorage,
     this._preferences,
-    this._cache,
-  );
+    this._cache, {
+    ChatSocketService? socketService,
+  }) : _socketService = socketService;
 
   final Set<String> _missingAttachmentPreviewUrls = <String>{};
   final Map<String, Future<Uint8List>> _attachmentPreviewLoads =
@@ -34,6 +42,7 @@ class ChatRepository {
   final LocalMediaStorageService _localStorage;
   final UserPreferences _preferences;
   final ChatLocalCache _cache;
+  final ChatSocketService? _socketService;
 
   ChatLocalCache get cache => _cache;
 
@@ -55,15 +64,31 @@ class ChatRepository {
     return Duration(seconds: seconds);
   }
 
+  List<ChatConversation> _parseConversationsSafely(
+    List<Map<String, dynamic>> rawItems,
+  ) {
+    final parsed = <ChatConversation>[];
+    for (final item in rawItems) {
+      try {
+        final conv = ChatConversation.fromJson(item);
+        if (conv.id.isNotEmpty) {
+          parsed.add(conv);
+        }
+      } catch (_) {
+        // Ignore single malformed conversation so others still load
+      }
+    }
+    return parsed;
+  }
+
   Future<List<ChatConversation>> fetchConversations() async {
     try {
       final response = await _apiClient.dio.get<Map<String, dynamic>>(
         '/api/chat/conversations',
       );
-      final list = _extractList(
-        response.data,
-        'conversations',
-      ).map(ChatConversation.fromJson).toList();
+      final list = _parseConversationsSafely(
+        _extractList(response.data, 'conversations'),
+      );
       if (response.data != null) {
         await _cache.saveRawJson('conversations', response.data!);
       }
@@ -72,7 +97,9 @@ class ChatRepository {
       if (e is DioException) {
         final cached = await _cache.loadRawJson('conversations');
         if (cached != null) {
-          return _extractList(cached, 'conversations').map(ChatConversation.fromJson).toList();
+          return _parseConversationsSafely(
+            _extractList(cached, 'conversations'),
+          );
         }
       }
       rethrow;
@@ -83,10 +110,9 @@ class ChatRepository {
     final response = await _apiClient.dio.get<Map<String, dynamic>>(
       '/api/chat/admin/conversations',
     );
-    return _extractList(
-      response.data,
-      'conversations',
-    ).map(ChatConversation.fromJson).toList();
+    return _parseConversationsSafely(
+      _extractList(response.data, 'conversations'),
+    );
   }
 
   Future<ChatConversation> fetchConversation(String conversationId) async {
@@ -240,6 +266,7 @@ class ChatRepository {
     required String type,
     required String name,
     String description = '',
+    String? avatarUrl,
     List<String> memberIds = const [],
     List<String> adminIds = const [],
     String? departmentId,
@@ -250,6 +277,7 @@ class ChatRepository {
         'type': type,
         'name': name,
         'description': description,
+        if (avatarUrl != null && avatarUrl.isNotEmpty) 'avatarUrl': avatarUrl,
         'memberIds': memberIds,
         'adminIds': adminIds,
         if (departmentId != null && departmentId.isNotEmpty)
@@ -382,30 +410,83 @@ class ChatRepository {
     bool isScheduled = false,
     DateTime? scheduledFor,
   }) async {
-    final response = await _apiClient.dio.post<Map<String, dynamic>>(
-      '/api/chat/messages',
-      data: {
-        'conversationId': conversationId,
-        'content': content,
-        if (clientMessageId != null) 'clientMessageId': clientMessageId,
-        if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
-        if (metadata != null) 'metadata': metadata,
-        if (messageType != null) 'messageType': messageType,
-        if (fileUrl != null) 'fileUrl': fileUrl,
-        if (isSilent) 'isSilent': isSilent,
-        if (isScheduled) 'isScheduled': isScheduled,
-        if (scheduledFor != null)
-          'scheduledFor': scheduledFor.toIso8601String(),
-      },
-    );
-    return ChatPostResult(
-      conversation: ChatConversation.fromJson(
-        response.data?['conversation'] as Map<String, dynamic>,
-      ),
-      message: ChatMessage.fromJson(
-        response.data?['message'] as Map<String, dynamic>,
-      ),
-    );
+    final payload = <String, dynamic>{
+      'conversationId': conversationId,
+      'content': content,
+      if (clientMessageId != null) 'clientMessageId': clientMessageId,
+      if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
+      if (metadata != null) 'metadata': metadata,
+      if (messageType != null) 'messageType': messageType,
+      if (fileUrl != null) 'fileUrl': fileUrl,
+      if (isSilent) 'isSilent': isSilent,
+      if (isScheduled) 'isScheduled': isScheduled,
+      if (scheduledFor != null)
+        'scheduledFor': scheduledFor.toIso8601String(),
+    };
+
+    // Fast-path: send via active Socket.io channel if connected (instant single-hop, no HTTP handshake)
+    final socketService = _socketService;
+    if (!isScheduled && socketService != null && socketService.isConnected) {
+      try {
+        final ack = await socketService.emitWithAck(
+          'send_message',
+          payload,
+          timeout: const Duration(seconds: 4),
+        );
+        if (ack['ok'] == true && ack['data'] is Map) {
+          final data = Map<String, dynamic>.from(ack['data'] as Map);
+          if (data['message'] is Map && data['conversation'] is Map) {
+            return ChatPostResult(
+              conversation: ChatConversation.fromJson(
+                Map<String, dynamic>.from(data['conversation'] as Map),
+              ),
+              message: ChatMessage.fromJson(
+                Map<String, dynamic>.from(data['message'] as Map),
+              ),
+            );
+          }
+        }
+      } catch (_) {
+        // Socket failed or timed out; seamlessly fall back to HTTP POST
+      }
+    }
+
+    // Resilient HTTP sending with automatic retry on weak/VPN connections
+    Object? lastError;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      try {
+        final response = await _apiClient.dio.post<Map<String, dynamic>>(
+          '/api/chat/messages',
+          data: payload,
+          options: Options(
+            connectTimeout: const Duration(seconds: 15),
+            sendTimeout: const Duration(seconds: 25),
+            receiveTimeout: const Duration(seconds: 25),
+          ),
+        );
+        return ChatPostResult(
+          conversation: ChatConversation.fromJson(
+            response.data?['conversation'] as Map<String, dynamic>,
+          ),
+          message: ChatMessage.fromJson(
+            response.data?['message'] as Map<String, dynamic>,
+          ),
+        );
+      } catch (err) {
+        lastError = err;
+        if (err is DioException) {
+          final status = err.response?.statusCode ?? 0;
+          // Re-throw immediately on client 4xx validation or permission errors (not retryable)
+          if (status >= 400 && status < 500 && status != 408) {
+            rethrow;
+          }
+        }
+        if (attempt < 3) {
+          await Future.delayed(Duration(milliseconds: 600 * attempt));
+        }
+      }
+    }
+    throw lastError!;
   }
 
   Future<ChatPostResult> sendFileMessage({
@@ -413,18 +494,108 @@ class ChatRepository {
     required String filePath,
     Uint8List? fileBytes,
     String? sourceFileName,
+    String? content,
     String? replyToMessageId,
     String? customFileName,
     Map<String, dynamic>? metadata,
+    String? transferId,
+    CancelToken? cancelToken,
     void Function(int sent, int total)? onProgress,
   }) async {
     final safeCustomName = customFileName?.trim();
     final resolvedFileName = sourceFileName?.trim().isNotEmpty == true
         ? sourceFileName!.trim()
         : p.basename(filePath);
-    final fileLength = fileBytes?.length ?? await File(filePath).length();
+
+    // Fast-path for Electron Desktop: Direct native streaming upload via Node.js
+    // Zero Base64, zero Dart memory allocation, and zero UI thread freezing.
+    if (kIsWeb && web_bridge.isElectron() && filePath.isNotEmpty && (fileBytes == null || fileBytes.isEmpty)) {
+      final token = _authRepository.currentToken ?? await _authRepository.getToken();
+      final uploadUrl = resolveApiUrl('/api/chat/messages');
+
+      // Calculate SHA256 natively in Node.js worker thread (< 50ms)
+      final fileSha256 = await web_bridge.calculateElectronFileSha256(filePath);
+
+      final nextMetadata = <String, dynamic>{
+        ...?metadata,
+        if (fileSha256.isNotEmpty)
+          'attachmentArchive': {'sha256': fileSha256},
+      };
+
+      final res = await web_bridge.uploadElectronChatAttachment(
+        url: uploadUrl,
+        filePath: filePath,
+        token: token,
+        conversationId: conversationId,
+        content: content,
+        replyToMessageId: replyToMessageId,
+        fileName: safeCustomName ?? resolvedFileName,
+        metadata: nextMetadata,
+        transferId: transferId,
+        onProgress: onProgress,
+      );
+
+      if (res['success'] != true) {
+        final errMsg = res['error']?.toString() ?? 'فشل رفع الملف عبر التطبيق.';
+        if (res['isCancelled'] == true || errMsg.contains('إلغاء')) {
+          throw DioException(
+            requestOptions: RequestOptions(path: uploadUrl),
+            type: DioExceptionType.cancel,
+            message: errMsg,
+          );
+        }
+        throw Exception(errMsg);
+      }
+
+      final responseJson = res['responseJson']?.toString();
+      final Map<String, dynamic> payloadMap;
+      if (responseJson != null && responseJson.isNotEmpty) {
+        final decoded = jsonDecode(responseJson);
+        payloadMap = decoded is Map ? Map<String, dynamic>.from(decoded) : <String, dynamic>{};
+      } else if (res['data'] is Map) {
+        payloadMap = Map<String, dynamic>.from(res['data'] as Map);
+      } else {
+        payloadMap = <String, dynamic>{};
+      }
+
+      final dataMap = payloadMap['data'] is Map
+          ? Map<String, dynamic>.from(payloadMap['data'] as Map)
+          : payloadMap;
+
+      final rawConv = dataMap['conversation'] ?? payloadMap['conversation'];
+      final rawMsg = dataMap['message'] ?? payloadMap['message'];
+
+      if (rawConv is! Map || rawMsg is! Map) {
+        throw Exception('استجابة غير صالحة من السيرفر بعد رفع الملف.');
+      }
+
+      final result = ChatPostResult(
+        conversation: ChatConversation.fromJson(
+          Map<String, dynamic>.from(rawConv),
+        ),
+        message: ChatMessage.fromJson(
+          Map<String, dynamic>.from(rawMsg),
+        ),
+      );
+
+      // Fast archive in Electron (direct 1ms file copy on disk)
+      unawaited(
+        _archiveSentAttachment(
+          message: result.message,
+          sha256Hex: fileSha256,
+          filePath: filePath,
+          fileName: resolvedFileName,
+        ),
+      );
+
+      return result;
+    }
+
+    final fileLength = fileBytes?.length ?? (kIsWeb ? 0 : await File(filePath).length());
+    // PERF FIX: When fileBytes is in memory (clipboard paste), computing SHA256 on the
+    // Dart UI isolate blocks the event loop. Offload to a background isolate via compute().
     final fileSha256 = fileBytes != null
-        ? sha256.convert(fileBytes).toString()
+        ? await compute(_computeSha256Bytes, fileBytes)
         : await _localStorage.calculateFileSha256(filePath);
     final nextMetadata = <String, dynamic>{
       ...?metadata,
@@ -436,6 +607,8 @@ class ChatRepository {
         : await MultipartFile.fromFile(filePath, filename: resolvedFileName);
     final formData = FormData.fromMap({
       'conversationId': conversationId,
+      if (content != null && content.trim().isNotEmpty)
+        'content': content.trim(),
       if (replyToMessageId != null && replyToMessageId.isNotEmpty)
         'replyToMessageId': replyToMessageId,
       if (safeCustomName != null && safeCustomName.isNotEmpty)
@@ -447,6 +620,7 @@ class ChatRepository {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/chat/messages',
       data: formData,
+      cancelToken: cancelToken,
       options: Options(
         contentType: 'multipart/form-data',
         connectTimeout: uploadTimeout,
@@ -538,6 +712,15 @@ class ChatRepository {
     );
   }
 
+  Future<ChatMessage> sendScheduledMessageNow(String messageId) async {
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/api/chat/messages/$messageId/send-now',
+    );
+    final data = response.data?['data'] ?? response.data;
+    final msgJson = (data is Map<String, dynamic> ? data['message'] : null) ?? data;
+    return ChatMessage.fromJson(msgJson as Map<String, dynamic>);
+  }
+
   Future<void> removeMessage(String messageId) async {
     await _apiClient.dio.delete<Map<String, dynamic>>(
       '/api/chat/messages/$messageId',
@@ -551,6 +734,16 @@ class ChatRepository {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/chat/messages/$messageId/poll/vote',
       data: {'optionIds': optionIds},
+    );
+    return ChatMessage.fromJson(
+      (response.data?['data']?['message'] as Map<String, dynamic>?) ??
+          (response.data?['message'] as Map<String, dynamic>),
+    );
+  }
+
+  Future<ChatMessage> togglePollStatus(String messageId) async {
+    final response = await _apiClient.dio.patch<Map<String, dynamic>>(
+      '/api/chat/messages/$messageId/poll/toggle',
     );
     return ChatMessage.fromJson(
       (response.data?['data']?['message'] as Map<String, dynamic>?) ??
@@ -629,6 +822,7 @@ class ChatRepository {
     String conversationId, {
     bool deleteForEveryone = false,
   }) async {
+    await cache.removeConversation(conversationId);
     final response = await _apiClient.dio.delete<Map<String, dynamic>>(
       '/api/chat/conversations/$conversationId',
       queryParameters: {'scope': deleteForEveryone ? 'global' : 'self'},
@@ -640,18 +834,87 @@ class ChatRepository {
     return null;
   }
 
+  Future<ChatConversation?> clearConversationMessages(
+    String conversationId,
+  ) async {
+    await cache.clearConversationMessages(conversationId);
+    final response = await _apiClient.dio.delete<Map<String, dynamic>>(
+      '/api/chat/conversations/$conversationId',
+      queryParameters: {'scope': 'clear'},
+    );
+    final conversationData = response.data?['conversation'];
+    if (conversationData is Map<String, dynamic>) {
+      return ChatConversation.fromJson(conversationData);
+    }
+    return null;
+  }
+
+  Future<String?> getCachedAttachmentPath(ChatMessage message) async {
+    if (message.fileUrl == null || message.fileUrl!.isEmpty) return null;
+    final fileName = p.basename(message.fileName ?? 'attachment');
+    if (kIsWeb) {
+      if (web_bridge.isElectron()) {
+        return web_bridge.getElectronCachedAttachmentPath(
+          messageId: message.id,
+          fileName: fileName,
+          preferredDirectoryPath: _preferences.localStorageDirectoryPath,
+        );
+      }
+      return null;
+    }
+
+    final cacheDirectory = await _localStorage.chatDirectory(
+      preferredPath: _preferences.localStorageDirectoryPath,
+    );
+    final targetPath = p.join(
+      cacheDirectory.path,
+      '${message.id}_${_localStorage.sanitizeFileName(fileName)}',
+    );
+    if (await File(targetPath).exists()) {
+      return targetPath;
+    }
+    return null;
+  }
+
   Future<String> downloadAttachment(
     ChatMessage message, {
     void Function(int received, int total)? onProgress,
   }) async {
+    final fileName = p.basename(message.fileName ?? 'attachment');
+
     if (kIsWeb) {
+      if (web_bridge.isElectron()) {
+        final existingPath = await web_bridge.getElectronCachedAttachmentPath(
+          messageId: message.id,
+          fileName: fileName,
+          preferredDirectoryPath: _preferences.localStorageDirectoryPath,
+        );
+        if (existingPath != null) {
+          return existingPath;
+        }
+
+        final downloadUrl = _downloadUrlFor(message.fileUrl!);
+        final response = await _downloadAttachmentBytesWithRestore(
+          message,
+          downloadUrl,
+          onProgress: onProgress,
+        );
+
+        final cachedPath = await web_bridge.cacheElectronChatAttachment(
+          messageId: message.id,
+          fileName: fileName,
+          bytes: response,
+          preferredDirectoryPath: _preferences.localStorageDirectoryPath,
+        );
+        return cachedPath ?? fileName;
+      }
+
       final downloadUrl = _downloadUrlFor(message.fileUrl!);
       final response = await _apiClient.dio.get<List<int>>(
         downloadUrl,
         options: Options(responseType: ResponseType.bytes),
         onReceiveProgress: onProgress,
       );
-      final fileName = p.basename(message.fileName ?? 'attachment');
       await web_bridge.downloadBytes(
         bytes: Uint8List.fromList(response.data ?? const <int>[]),
         fileName: fileName,
@@ -660,7 +923,6 @@ class ChatRepository {
       return fileName;
     }
 
-    final fileName = p.basename(message.fileName ?? 'attachment');
     final cacheDirectory = await _localStorage.chatDirectory(
       preferredPath: _preferences.localStorageDirectoryPath,
     );
@@ -681,6 +943,336 @@ class ChatRepository {
     return targetPath;
   }
 
+  Future<String> resolveEffectiveSaveDirectoryPath({String? customPath}) async {
+    final preferred = customPath?.trim().isNotEmpty == true
+        ? customPath!.trim()
+        : _preferences.localStorageDirectoryPath?.trim();
+    if (preferred != null && preferred.isNotEmpty) {
+      if (!kIsWeb) {
+        try {
+          final dir = Directory(preferred);
+          if (!await dir.exists()) {
+            await dir.create(recursive: true);
+          }
+        } catch (_) {}
+      }
+      return preferred;
+    }
+
+    if (kIsWeb) {
+      if (web_bridge.isElectron()) {
+        try {
+          final root = await web_bridge.getElectronStorageRoot();
+          if (root != null && root.trim().isNotEmpty) {
+            return root.trim();
+          }
+        } catch (_) {}
+      }
+      return '';
+    }
+
+    if (Platform.isWindows) {
+      try {
+        final downloads = await getDownloadsDirectory();
+        if (downloads != null && await downloads.exists()) {
+          final ismartDir = Directory(p.join(downloads.path, 'iSmart Messenger'));
+          if (!await ismartDir.exists()) {
+            await ismartDir.create(recursive: true);
+          }
+          return ismartDir.path;
+        }
+      } catch (_) {}
+    }
+
+    try {
+      final rootDir = await _localStorage.resolveRootDirectory();
+      return rootDir.path;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<Directory> resolveEffectiveSaveDirectory({String? customPath}) async {
+    if (kIsWeb) {
+      throw UnsupportedError('resolveEffectiveSaveDirectory is not supported on web. Use resolveEffectiveSaveDirectoryPath instead.');
+    }
+    final path = await resolveEffectiveSaveDirectoryPath(customPath: customPath);
+    final dir = Directory(path);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir;
+  }
+
+  String _resolveCleanFileName(ChatMessage message) {
+    var rawName = (message.fileName ?? '').trim();
+    if (rawName.isEmpty) {
+      final shortId = message.id.length > 8 ? message.id.substring(0, 8) : message.id;
+      rawName = 'ملف_$shortId';
+    }
+    var safeName = _localStorage.sanitizeFileName(rawName);
+    if (p.extension(safeName).isEmpty) {
+      final ext = _resolveFallbackExtension(
+        mimeType: message.mimeType,
+        fileUrl: message.fileUrl,
+        messageType: message.messageType,
+        isImage: message.isImageMessage,
+        isPdf: message.isPdfMessage,
+        isAudio: message.isAudioMessage,
+      );
+      if (ext.isNotEmpty) {
+        safeName = '$safeName$ext';
+      }
+    }
+    return safeName;
+  }
+
+  String _resolveFallbackExtension({
+    String? mimeType,
+    String? fileUrl,
+    String? messageType,
+    bool isImage = false,
+    bool isPdf = false,
+    bool isAudio = false,
+  }) {
+    final mime = (mimeType ?? '').trim().toLowerCase();
+    if (mime.isNotEmpty) {
+      if (mime == 'application/pdf') return '.pdf';
+      if (mime.contains('spreadsheet') || mime.contains('excel')) return '.xlsx';
+      if (mime.contains('wordprocessing') || mime.contains('msword')) return '.docx';
+      if (mime.contains('presentation') || mime.contains('powerpoint')) return '.pptx';
+      if (mime == 'image/jpeg' || mime == 'image/jpg') return '.jpg';
+      if (mime == 'image/png') return '.png';
+      if (mime == 'image/webp') return '.webp';
+      if (mime == 'image/gif') return '.gif';
+      if (mime == 'application/zip') return '.zip';
+      if (mime == 'application/x-rar-compressed') return '.rar';
+      if (mime == 'text/plain') return '.txt';
+      if (mime.startsWith('image/')) return '.jpg';
+      if (mime.startsWith('video/')) return '.mp4';
+      if (mime.startsWith('audio/')) return '.mp3';
+    }
+
+    if (fileUrl != null && fileUrl.isNotEmpty) {
+      try {
+        final uri = Uri.tryParse(fileUrl);
+        final path = uri?.path ?? fileUrl;
+        final ext = p.extension(path).toLowerCase();
+        if (ext.isNotEmpty && ext.length <= 6 && RegExp(r'^\.[a-z0-9]+$').hasMatch(ext)) {
+          return ext;
+        }
+      } catch (_) {}
+    }
+
+    if (isImage || messageType == 'image') return '.jpg';
+    if (isAudio || messageType == 'audio') return '.mp3';
+    if (isPdf || messageType == 'pdf') return '.pdf';
+    if (messageType == 'video') return '.mp4';
+    return '';
+  }
+
+  Future<String?> getSavedAttachmentPath(
+    ChatMessage message, {
+    String? customSaveDirectory,
+  }) async {
+    if (message.fileUrl == null || message.fileUrl!.isEmpty) return null;
+    final safeFileName = _resolveCleanFileName(message);
+
+    if (kIsWeb) {
+      if (web_bridge.isElectron()) {
+        final targetDirPath = await resolveEffectiveSaveDirectoryPath(customPath: customSaveDirectory);
+        if (targetDirPath.isNotEmpty) {
+          final candidate = p.join(targetDirPath, safeFileName);
+          final exists = await web_bridge.electronFileExists(candidate);
+          if (exists) return candidate;
+        }
+        return await web_bridge.getElectronCachedAttachmentPath(
+          messageId: message.id,
+          fileName: safeFileName,
+          preferredDirectoryPath: targetDirPath.isNotEmpty ? targetDirPath : null,
+        );
+      }
+      return null;
+    }
+
+    final targetDir = await resolveEffectiveSaveDirectory(customPath: customSaveDirectory);
+    final candidatePath = p.join(targetDir.path, safeFileName);
+    final candidateFile = File(candidatePath);
+    if (await candidateFile.exists()) {
+      if (message.fileSize != null && message.fileSize! > 0) {
+        final len = await candidateFile.length();
+        if (len == message.fileSize) {
+          return candidatePath;
+        }
+      } else {
+        return candidatePath;
+      }
+    }
+    return null;
+  }
+
+  Future<String> saveAttachmentToLocalStorage(
+    ChatMessage message, {
+    String? customSaveDirectory,
+    String? targetFilePath,
+    CancelToken? cancelToken,
+    String? transferId,
+    void Function(int received, int total)? onProgress,
+  }) async {
+    final safeFileName = _resolveCleanFileName(message);
+
+    if (kIsWeb) {
+      if (web_bridge.isElectron()) {
+        final targetDirPath = targetFilePath != null
+            ? p.dirname(targetFilePath)
+            : await resolveEffectiveSaveDirectoryPath(customPath: customSaveDirectory);
+        final existingPath = targetFilePath ??
+            (targetDirPath.isNotEmpty ? p.join(targetDirPath, safeFileName) : safeFileName);
+
+        // Check if message is already archived/cached locally in Electron
+        final cachedPath = await web_bridge.getElectronCachedAttachmentPath(
+          messageId: message.id,
+          fileName: safeFileName,
+          preferredDirectoryPath: targetFilePath == null && targetDirPath.isNotEmpty ? targetDirPath : null,
+        );
+        if (cachedPath != null && cachedPath.isNotEmpty) {
+          if (targetFilePath != null) {
+            final copied = await web_bridge.copyElectronFile(
+              sourcePath: cachedPath,
+              destinationPath: targetFilePath,
+            );
+            if (copied) return targetFilePath;
+          } else {
+            return cachedPath;
+          }
+        }
+
+        // Direct streaming download via Electron (zero Dart memory, zero UI thread lag)
+        if (message.fileUrl != null && message.fileUrl!.isNotEmpty) {
+          final downloadUrl = _downloadUrlFor(message.fileUrl!);
+          final token = _authRepository.currentToken ?? await _authRepository.getToken();
+          final res = await web_bridge.downloadElectronChatAttachment(
+            url: downloadUrl,
+            destinationPath: existingPath,
+            token: token,
+            transferId: transferId,
+            onProgress: onProgress,
+          );
+          if (res['success'] == true && res['path'] != null) {
+            return res['path'].toString();
+          }
+        }
+
+        final localBytes = await _readLocalAttachmentBytes(message);
+        final Uint8List bytes;
+        if (localBytes != null && localBytes.isNotEmpty) {
+          bytes = localBytes;
+        } else {
+          bytes = await _downloadAttachmentBytesWithRestore(
+            message,
+            _downloadUrlFor(message.fileUrl!),
+            cancelToken: cancelToken,
+            onProgress: onProgress,
+          );
+          unawaited(_cacheAttachmentPreviewBytes(message, bytes).catchError((_) {}));
+        }
+        final saved = await web_bridge.downloadBytes(
+          bytes: bytes,
+          fileName: safeFileName,
+          mimeType: message.mimeType,
+          preferredDirectoryPath: targetDirPath.isNotEmpty ? targetDirPath : null,
+        );
+        return saved ?? existingPath;
+      }
+
+      final bytes = await _downloadAttachmentBytesWithRestore(
+        message,
+        _downloadUrlFor(message.fileUrl!),
+        cancelToken: cancelToken,
+        onProgress: onProgress,
+      );
+      await web_bridge.downloadBytes(
+        bytes: bytes,
+        fileName: safeFileName,
+        mimeType: message.mimeType,
+      );
+      return safeFileName;
+    }
+
+    // Native Desktop (Windows / macOS / Linux)
+    if (targetFilePath != null && targetFilePath.isNotEmpty) {
+      final destFile = File(targetFilePath);
+      if (!destFile.parent.existsSync()) {
+        await destFile.parent.create(recursive: true);
+      }
+      final cached = await getCachedAttachmentPath(message);
+      if (cached != null && File(cached).existsSync()) {
+        await File(cached).copy(targetFilePath);
+        return targetFilePath;
+      }
+      final downloadUrl = _downloadUrlFor(message.fileUrl!);
+      for (var attempt = 0; attempt < 4; attempt++) {
+        try {
+          await _apiClient.dio.download(
+            downloadUrl,
+            targetFilePath,
+            cancelToken: cancelToken,
+            deleteOnError: false,
+            options: Options(
+              extra: <String, Object?>{
+                'isTransfer': true,
+              },
+            ),
+            onReceiveProgress: onProgress,
+          );
+          return targetFilePath;
+        } on DioException {
+          if (cancelToken?.isCancelled == true) rethrow;
+          if (attempt == 3) rethrow;
+          await Future<void>.delayed(Duration(seconds: 1 + attempt * 2));
+        }
+      }
+      return targetFilePath;
+    }
+    final targetDir = await resolveEffectiveSaveDirectory(customPath: customSaveDirectory);
+    final baseName = p.basenameWithoutExtension(safeFileName);
+    final extension = p.extension(safeFileName);
+    final primaryCandidate = p.join(targetDir.path, safeFileName);
+    final primaryFile = File(primaryCandidate);
+
+    if (await primaryFile.exists()) {
+      final existingSize = await primaryFile.length();
+      if (message.fileSize == null || message.fileSize! <= 0 || existingSize == message.fileSize) {
+        return primaryCandidate;
+      }
+    }
+
+    Uint8List? bytes = await _readLocalAttachmentBytes(message);
+    if (bytes == null || bytes.isEmpty) {
+      bytes = await _downloadAttachmentBytesWithRestore(
+        message,
+        _downloadUrlFor(message.fileUrl!),
+        onProgress: onProgress,
+      );
+      await _cacheAttachmentPreviewBytes(message, bytes);
+    }
+
+    var finalPath = primaryCandidate;
+    var counter = 1;
+    var candidateFile = File(finalPath);
+    while (await candidateFile.exists()) {
+      final existingLen = await candidateFile.length();
+      if (existingLen == bytes.length) {
+        return finalPath;
+      }
+      finalPath = p.join(targetDir.path, '$baseName ($counter)$extension');
+      candidateFile = File(finalPath);
+      counter++;
+    }
+
+    await candidateFile.writeAsBytes(bytes, flush: true);
+    return finalPath;
+  }
   Future<Uint8List> fetchAttachmentBytes(ChatMessage message) async {
     return _downloadAttachmentBytesWithRestore(
       message,
@@ -696,10 +1288,18 @@ class ChatRepository {
     }
     final load = _fetchAttachmentPreviewBytes(message);
     _attachmentPreviewLoads[cacheKey] = load;
-    load.whenComplete(() {
+    
+    // Prevent infinite growth: max 100 items
+    if (_attachmentPreviewLoads.length > 100) {
+      final firstKey = _attachmentPreviewLoads.keys.first;
+      _attachmentPreviewLoads.remove(firstKey);
+    }
+    
+    load.catchError((e, st) {
       if (identical(_attachmentPreviewLoads[cacheKey], load)) {
         _attachmentPreviewLoads.remove(cacheKey);
       }
+      Error.throwWithStackTrace(e, st);
     });
     return load;
   }
@@ -708,6 +1308,9 @@ class ChatRepository {
     final localBytes = await _readLocalAttachmentBytes(message);
     if (localBytes != null) {
       return localBytes;
+    }
+    if (message.fileUrl == null || message.fileUrl!.isEmpty) {
+      throw StateError('Attachment preview is pending upload.');
     }
     final previewUrl = _inlineUrlFor(message.fileUrl!);
     if (_missingAttachmentPreviewUrls.contains(previewUrl)) {
@@ -783,15 +1386,20 @@ class ChatRepository {
   Future<Uint8List> _downloadAttachmentBytesWithRestore(
     ChatMessage message,
     String downloadUrl, {
+    CancelToken? cancelToken,
     void Function(int received, int total)? onProgress,
     bool skipErrorLog = false,
   }) async {
     try {
       final response = await _apiClient.dio.get<List<int>>(
         downloadUrl,
+        cancelToken: cancelToken,
         options: Options(
           responseType: ResponseType.bytes,
-          extra: <String, Object?>{if (skipErrorLog) 'skipErrorLog': true},
+          extra: <String, Object?>{
+            if (skipErrorLog) 'skipErrorLog': true,
+            'isTransfer': true,
+          },
         ),
         onReceiveProgress: onProgress,
       );
@@ -830,12 +1438,13 @@ class ChatRepository {
     Uint8List? fileBytes,
   }) async {
     try {
-      if (kIsWeb && web_bridge.isElectron() && fileBytes != null) {
+      if (kIsWeb && web_bridge.isElectron()) {
         await web_bridge.archiveElectronChatAttachment(
           messageId: message.id,
           sha256Hex: sha256Hex,
           fileName: fileName,
           bytes: fileBytes,
+          sourcePath: filePath,
           preferredDirectoryPath: _preferences.localStorageDirectoryPath,
         );
         return;
@@ -852,6 +1461,17 @@ class ChatRepository {
   }
 
   Future<Uint8List?> _readLocalAttachmentBytes(ChatMessage message) async {
+    final localPath = message.metadata?['localFilePath']?.toString();
+    if (localPath != null && localPath.isNotEmpty) {
+      try {
+        if (!kIsWeb) {
+          final f = File(localPath);
+          if (await f.exists()) {
+            return await f.readAsBytes();
+          }
+        }
+      } catch (_) {}
+    }
     final archive = _attachmentArchiveMetadata(message);
     final sha256Hex = archive?['sha256']?.toString().trim().toLowerCase();
     if (kIsWeb && web_bridge.isElectron()) {
@@ -870,6 +1490,10 @@ class ChatRepository {
           preferredDirectoryPath: _preferences.localStorageDirectoryPath,
         );
       }
+      return null;
+    }
+
+    if (kIsWeb) {
       return null;
     }
 
@@ -899,19 +1523,23 @@ class ChatRepository {
     return null;
   }
 
+  Future<void> cacheAttachmentPreviewBytes(ChatMessage message, Uint8List bytes) => _cacheAttachmentPreviewBytes(message, bytes);
+
   Future<void> _cacheAttachmentPreviewBytes(
     ChatMessage message,
     Uint8List bytes,
   ) async {
     if (bytes.isEmpty) return;
     try {
-      if (kIsWeb && web_bridge.isElectron()) {
-        await web_bridge.cacheElectronChatAttachment(
-          messageId: message.id,
-          fileName: message.fileName ?? 'attachment',
-          bytes: bytes,
-          preferredDirectoryPath: _preferences.localStorageDirectoryPath,
-        );
+      if (kIsWeb) {
+        if (web_bridge.isElectron()) {
+          await web_bridge.cacheElectronChatAttachment(
+            messageId: message.id,
+            fileName: message.fileName ?? 'attachment',
+            bytes: bytes,
+            preferredDirectoryPath: _preferences.localStorageDirectoryPath,
+          );
+        }
         return;
       }
 
@@ -1016,10 +1644,16 @@ class ChatRepository {
     required String name,
     required String code,
     String description = '',
+    List<String> managers = const [],
   }) async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/admin/departments',
-      data: {'name': name, 'code': code, 'description': description},
+      data: {
+        'name': name,
+        'code': code,
+        'description': description,
+        'managers': managers,
+      },
     );
     return DepartmentSummary.fromJson(
       response.data?['department'] as Map<String, dynamic>,
@@ -1122,6 +1756,58 @@ class ChatRepository {
 
   Future<void> deleteManagedConversation(String conversationId) async {
     await deleteConversation(conversationId, deleteForEveryone: true);
+  }
+
+Future<ChatConversation> uploadConversationAvatar({
+    required String conversationId,
+    String? filePath,
+    Uint8List? fileBytes,
+    String? fileName,
+  }) async {
+    final token = _authRepository.currentToken ?? await _authRepository.getToken();
+    final resolvedFileName = fileName?.trim().isNotEmpty == true
+        ? fileName!.trim()
+        : (filePath != null ? p.basename(filePath) : 'avatar.jpg');
+
+    final MultipartFile multipartFile;
+    if (fileBytes != null) {
+      multipartFile = MultipartFile.fromBytes(fileBytes, filename: resolvedFileName);
+    } else if (filePath != null && filePath.isNotEmpty) {
+      multipartFile = await MultipartFile.fromFile(filePath, filename: resolvedFileName);
+    } else {
+      throw ArgumentError('Either filePath or fileBytes must be provided');
+    }
+
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/api/chat/conversations/$conversationId/avatar',
+      data: FormData.fromMap({
+        'avatar': multipartFile,
+      }),
+      options: Options(
+        headers: {
+          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+        contentType: 'multipart/form-data',
+      ),
+    );
+    final raw = response.data?['data']?['conversation'] ??
+        response.data?['conversation'];
+    return ChatConversation.fromJson(raw as Map<String, dynamic>);
+  }
+
+  Future<ChatConversation> removeConversationAvatar(String conversationId) async {
+    final token = _authRepository.currentToken ?? await _authRepository.getToken();
+    final response = await _apiClient.dio.delete<Map<String, dynamic>>(
+      '/api/chat/conversations/$conversationId/avatar',
+      options: Options(
+        headers: {
+          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+      ),
+    );
+    final raw = response.data?['data']?['conversation'] ??
+        response.data?['conversation'];
+    return ChatConversation.fromJson(raw as Map<String, dynamic>);
   }
 
   Future<ChatConversation> addGroupMembers({
@@ -1280,16 +1966,15 @@ class ChatRepository {
     return response.data?["data"] as Map<String, dynamic>? ?? {};
   }
 
-  Future<File> downloadPollExport(String messageId) async {
+  Future<String> downloadPollExport(String messageId) async {
     final response = await _apiClient.dio.get<List<int>>(
       "/api/chat/messages/$messageId/poll/export",
       options: Options(responseType: ResponseType.bytes),
     );
     final bytes = response.data;
-    if (bytes == null) throw Exception("Failed to download export");
-    final directory = await _localStorage.chatDirectory(
-      preferredPath: _preferences.localStorageDirectoryPath,
-    );
+    if (bytes == null || bytes.isEmpty) {
+      throw Exception("ملف نتائج الاستطلاع فارغ أو تعذر تحميله.");
+    }
     final disposition = response.headers.value("content-disposition") ?? "";
     String filename = "poll_export_$messageId.xlsx";
     if (disposition.contains("filename=")) {
@@ -1298,9 +1983,58 @@ class ChatRepository {
           .last
           .replaceAll("\"", "")
           .trim();
+      try {
+        filename = Uri.decodeComponent(filename);
+      } catch (_) {}
     }
-    final file = File(p.join(directory.path, filename));
-    await file.writeAsBytes(bytes);
-    return file;
+
+    if (kIsWeb) {
+      final savedPath = await web_bridge.downloadBytes(
+        bytes: Uint8List.fromList(bytes),
+        fileName: filename,
+        mimeType:
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        preferredDirectoryPath: _preferences.localStorageDirectoryPath,
+      );
+      return savedPath ?? filename;
+    }
+
+    final directory = await _localStorage.chatDirectory(
+      preferredPath: _preferences.localStorageDirectoryPath,
+    );
+    final targetPath = p.join(directory.path, filename);
+    final file = File(targetPath);
+    await file.writeAsBytes(bytes, flush: true);
+    return file.path;
+  }
+
+  Future<Map<String, dynamic>> fetchUserStickers() async {
+    final response =
+        await _apiClient.dio.get<Map<String, dynamic>>("/api/chat/stickers");
+    return response.data ?? const <String, dynamic>{};
+  }
+
+  Future<void> syncUserStickers({
+    required List<Map<String, dynamic>> stickers,
+    required List<Map<String, dynamic>> packs,
+  }) async {
+    await _apiClient.dio.put<void>(
+      "/api/chat/stickers",
+      data: {
+        "stickers": stickers,
+        "packs": packs,
+      },
+    );
+  }
+
+  Future<void> saveUserSticker(Map<String, dynamic> sticker) async {
+    await _apiClient.dio.post<void>(
+      "/api/chat/stickers",
+      data: sticker,
+    );
+  }
+
+  Future<void> deleteUserSticker(String stickerId) async {
+    await _apiClient.dio.delete<void>("/api/chat/stickers/$stickerId");
   }
 }

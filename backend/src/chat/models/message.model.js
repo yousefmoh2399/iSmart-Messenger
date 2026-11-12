@@ -122,6 +122,8 @@ const messageSchema = new mongoose.Schema(
 );
 
 messageSchema.index({ conversationId: 1, createdAt: -1 });
+messageSchema.index({ conversationId: 1, isDeleted: 1, createdAt: -1 });
+messageSchema.index({ conversationId: 1, isDeleted: 1, "deliveredTo.userId": 1 });
 messageSchema.index(
   { senderId: 1, clientMessageId: 1 },
   {

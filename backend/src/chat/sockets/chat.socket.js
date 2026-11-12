@@ -3,6 +3,7 @@ const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 const User = require("../../models/user.model");
 const DeviceSession = require("../../models/device-session.model");
+const Conversation = require("../models/conversation.model");
 const { jwtSecret, corsOrigin } = require("../../config/env");
 const { resolveStoredUploadPath } = require("../../utils/storage-paths");
 const logger = require("../../utils/logger");
@@ -19,27 +20,41 @@ const {
   getUserPresence,
 } = require("../services/chat.service");
 const { getEffectivePermissionsForUser } = require("../services/role.service");
+const { AUTH_USER_PROJECTION } = require("../../middleware/auth.middleware");
 const {
   getUnreadCountsForUser,
+  getConversationState,
 } = require("../services/chat-member-state.service");
 const {
   setUserPresence,
   touchUserActivity,
 } = require("../../services/user.service");
 const { getChatTransferForUser } = require("../services/chat-transfer.service");
+const { recordSocketTelemetry } = require("../../middleware/request-telemetry.middleware");
 const {
   sendChatPushNotifications,
+  sendDismissPushNotification,
+  sendTicketPushNotifications,
+  sendReminderPushNotifications,
 } = require("../../services/push-notification.service");
 
 const typingState = new Map();
 const typingTimeouts = new Map();
+const userReminderTimers = new Map();
+let activeIOInstance = null;
 const userSockets = new Map();
 const socketPresence = new Map();
 const socketClientType = new Map();
 const publishedPresenceState = new Map();
+const pendingOfflineTimers = new Map();
+const PRESENCE_OFFLINE_GRACE_MS = Math.max(
+  0,
+  Number(process.env.PRESENCE_OFFLINE_GRACE_MS) || 4000,
+);
 const printerCatalogByUser = new Map();
 const printJobOwnerById = new Map();
 const desktopStorageByUser = new Map();
+const clipboardHistoryByUser = new Map();
 const saveJobOwnerById = new Map();
 const receiveJobOwnerById = new Map();
 const SOCKET_MAX_PAYLOAD_BYTES =
@@ -72,7 +87,54 @@ function emitPresence(io, userId, isOnline, status, extra = {}) {
   io.to("lobby").emit(isOnline ? "user_online" : "user_offline", payload);
 }
 
+function cancelPendingOfflinePublish(userId) {
+  const uid = String(userId || "").trim();
+  if (!uid) return false;
+  const existing = pendingOfflineTimers.get(uid);
+  if (existing) {
+    clearTimeout(existing);
+    pendingOfflineTimers.delete(uid);
+    return true;
+  }
+  return false;
+}
+
+function scheduleOfflineGracePublish(
+  io,
+  userId,
+  graceMs = PRESENCE_OFFLINE_GRACE_MS,
+  extra = {},
+) {
+  const uid = String(userId || "").trim();
+  if (!uid) return;
+  cancelPendingOfflinePublish(uid);
+
+  const runPublish = () => {
+    pendingOfflineTimers.delete(uid);
+    const activeSockets = pruneUserSockets(io, uid);
+    if (activeSockets.size > 0) {
+      return Promise.resolve();
+    }
+    return publishAggregatedPresence(io, uid, {
+      lastSeen: new Date().toISOString(),
+      ...extra,
+    }).catch(() => {});
+  };
+
+  if (graceMs <= 0) {
+    runPublish();
+    return;
+  }
+
+  const timer = setTimeout(runPublish, graceMs);
+  if (typeof timer.unref === "function") {
+    timer.unref();
+  }
+  pendingOfflineTimers.set(uid, timer);
+}
+
 function registerUserSocket(userId, socketId) {
+  cancelPendingOfflinePublish(userId);
   const sockets = userSockets.get(userId) || new Set();
   sockets.add(socketId);
   userSockets.set(userId, sockets);
@@ -88,14 +150,15 @@ function unregisterUserSocket(userId, socketId) {
   sockets.delete(socketId);
   if (!sockets.size) {
     userSockets.delete(userId);
-    publishedPresenceState.delete(userId);
+    // Keep publishedPresenceState until publishAggregatedPresence actually
+    // transitions the user offline after the VPN flap grace window.
   }
 }
 
 function hasLiveSocketId(io, socketId) {
   const registry = io?.sockets?.sockets;
   if (!registry) {
-    return true;
+    return false;
   }
   if (typeof registry.has === "function") {
     return registry.has(socketId);
@@ -106,7 +169,7 @@ function hasLiveSocketId(io, socketId) {
   if (typeof registry === "object") {
     return Boolean(registry[socketId]);
   }
-  return true;
+  return false;
 }
 
 function pruneUserSockets(io, userId) {
@@ -120,7 +183,6 @@ function pruneUserSockets(io, userId) {
   }
   if (!sockets.size) {
     userSockets.delete(userId);
-    publishedPresenceState.delete(userId);
   } else {
     userSockets.set(userId, sockets);
   }
@@ -246,16 +308,19 @@ function getAggregatedPresence(io, userId) {
 async function publishAggregatedPresence(io, userId, extra = {}) {
   const aggregated = getAggregatedPresence(io, userId);
   const nextSignature = `${aggregated.isOnline ? "1" : "0"}:${aggregated.status}`;
-  const hasExtra = extra && Object.keys(extra).length > 0;
   const currentSignature = publishedPresenceState.get(userId);
-  if (!hasExtra && currentSignature === nextSignature) {
+  if (currentSignature === nextSignature) {
     return;
   }
   await setUserPresence(userId, {
     isOnline: aggregated.isOnline,
     status: aggregated.status,
   });
-  publishedPresenceState.set(userId, nextSignature);
+  if (aggregated.isOnline) {
+    publishedPresenceState.set(userId, nextSignature);
+  } else {
+    publishedPresenceState.delete(userId);
+  }
 
   const payload = { ...extra };
   if (aggregated.isOnline) {
@@ -267,11 +332,20 @@ async function publishAggregatedPresence(io, userId, extra = {}) {
   emitPresence(io, userId, aggregated.isOnline, aggregated.status, payload);
 }
 
+// Debounce map: userId → timestamp of last DB write (P3 performance fix)
+const _lastActivityWrite = new Map();
+const ACTIVITY_DEBOUNCE_MS = 30_000; // 30 seconds
+
 async function markActive(io, currentUser, socketId) {
   registerUserSocket(currentUser.id, socketId);
   socketPresence.set(socketId, "online");
   try {
-    await touchUserActivity(currentUser.id, "online");
+    const now = Date.now();
+    const lastWrite = _lastActivityWrite.get(currentUser.id) || 0;
+    if (now - lastWrite >= ACTIVITY_DEBOUNCE_MS) {
+      _lastActivityWrite.set(currentUser.id, now);
+      await touchUserActivity(currentUser.id, "online");
+    }
     await publishAggregatedPresence(io, currentUser.id, {
       lastActiveAt: new Date().toISOString(),
     });
@@ -304,13 +378,24 @@ async function resolveSocketUser(socket) {
   }
 
   const payload = jwt.verify(rawToken, jwtSecret);
-  const user = await User.findById(payload.sub).lean();
+  const user = await User.findById(payload.sub)
+    .select(AUTH_USER_PROJECTION)
+    .lean();
   if (!user || user.isActive === false) {
     throw new Error("User not found.");
   }
   if (
     resolveTokenVersion(user.tokenVersion) !==
     resolveTokenVersion(payload.tokenVersion)
+  ) {
+    throw new Error("Session expired. Please login again.");
+  }
+  if (
+    payload.did &&
+    payload.did !== "unknown" &&
+    Array.isArray(user.refreshSessions) &&
+    user.refreshSessions.length > 0 &&
+    !user.refreshSessions.some((s) => s && s.deviceUid === payload.did)
   ) {
     throw new Error("Session expired. Please login again.");
   }
@@ -322,7 +407,11 @@ async function resolveSocketUser(socket) {
     "unknown";
 
   const deviceInfo = socket.handshake.auth?.deviceInfo || {};
-  console.log("Extracted deviceInfo from auth:", deviceInfo);
+  const deviceUid =
+    payload.did ||
+    socket.handshake.auth?.deviceUid ||
+    socket.handshake.headers?.["x-device-uid"] ||
+    null;
   const ipAddress = socket.handshake.headers?.["x-forwarded-for"] || socket.handshake.address || null;
 
   return {
@@ -331,27 +420,44 @@ async function resolveSocketUser(socket) {
     fullName: user.fullName,
     role: user.role,
     departmentId: user.departmentId ? user.departmentId.toString() : null,
+    branchCode: user.branchCode || null,
+    branchId: user.branchId ? user.branchId.toString() : null,
     permissions: await getEffectivePermissionsForUser(user),
     clientType: normalizeClientType(clientType),
+    deviceUid: deviceUid ? String(deviceUid).trim() : null,
     deviceInfo,
     ipAddress,
   };
 }
 
-function emitMessageToRecipients(io, message) {
+function emitMessageToRecipients(io, message, recipientUserIds = []) {
   const recipients = new Set(
-    (message.deliveredTo || [])
-      .map((entry) => entry.userId?.toString?.() || entry.userId)
+    (recipientUserIds || [])
+      .concat(
+        (message.deliveredTo || []).map(
+          (entry) => entry.userId?.toString?.() || entry.userId,
+        ),
+      )
       .filter(Boolean),
   );
 
+  // Deduplicate across rooms using chained .to() so each socket receives receive_message exactly ONCE
+  let messageTarget = io.to(getConversationRoom(message.conversationId));
   if (message.senderId) {
-    io.to(`user:${message.senderId}`).emit("receive_message", message);
+    messageTarget = messageTarget.to(`user:${message.senderId}`);
   }
-
   for (const userId of recipients) {
-    io.to(`user:${userId}`).emit("receive_message", message);
-    io.to(`user:${userId}`).emit("message_delivered", {
+    messageTarget = messageTarget.to(`user:${userId}`);
+  }
+  messageTarget.emit("receive_message", message);
+
+  // Delivery receipts: sender needs to know when delivered!
+  for (const userId of recipients) {
+    let deliveryTarget = io.to(getConversationRoom(message.conversationId));
+    if (message.senderId) {
+      deliveryTarget = deliveryTarget.to(`user:${message.senderId}`);
+    }
+    deliveryTarget.emit("message_delivered", {
       conversationId: message.conversationId,
       messageId: message.id,
       userId,
@@ -385,6 +491,53 @@ async function emitConversationToUsers(io, conversationId, userIds = []) {
   );
 }
 
+async function emitConversationToMembers(io, conversationId, extraUserIds = []) {
+  try {
+    const conv = await getConversationById(conversationId).catch(() => null);
+    if (!conv) return;
+    const memberIds = Array.isArray(conv.members)
+      ? conv.members.map((m) => (m?._id ? m._id.toString() : m?.toString?.())).filter(Boolean)
+      : [];
+    const allUserIds = [
+      ...new Set([...memberIds, ...(extraUserIds || []).map(String).filter(Boolean)]),
+    ];
+    return await emitConversationToUsers(io, conversationId, allUserIds);
+  } catch (err) {
+    logger.warn("chat.conversation_members_emit_failed", {
+      conversationId: String(conversationId),
+      error: err?.message,
+    });
+  }
+}
+
+function leaveUserFromConversationRoom(ioInstance, userId, conversationId) {
+  const io = ioInstance || activeIOInstance;
+  const uid = String(userId?._id || userId || "").trim();
+  const room = getConversationRoom(conversationId);
+  if (!io || !uid || !room) return;
+
+  try {
+    if (typeof io.in === "function" && typeof io.in(`user:${uid}`).socketsLeave === "function") {
+      io.in(`user:${uid}`).socketsLeave(room);
+    }
+  } catch (_) {}
+
+  if (io.sockets?.sockets) {
+    const socketIds = pruneUserSockets(io, uid);
+    for (const socketId of socketIds) {
+      const sock =
+        typeof io.sockets.sockets.get === "function"
+          ? io.sockets.sockets.get(socketId)
+          : io.sockets.sockets[socketId];
+      if (sock) {
+        try {
+          sock.leave(room);
+        } catch (_) {}
+      }
+    }
+  }
+}
+
 async function emitUnreadCount(io, userId, conversationId) {
   const unreadMap = await getUnreadCountsForUser(userId);
   io.to(`user:${userId}`).emit("unread_count_updated", {
@@ -394,11 +547,49 @@ async function emitUnreadCount(io, userId, conversationId) {
   });
 }
 
+async function getConversationMemberIds(conversation) {
+  if (!conversation) return [];
+  const memberIds = new Set(
+    (conversation.members || []).map((m) =>
+      m && m._id ? m._id.toString() : m ? m.toString() : "",
+    ).filter(Boolean),
+  );
+  if (conversation.type === "department" && conversation.departmentId) {
+    const deptId =
+      conversation.departmentId._id?.toString?.() ||
+      conversation.departmentId.toString?.();
+    if (deptId) {
+      try {
+        const departmentUsers = await User.find(
+          {
+            isActive: true,
+            $or: [
+              { departmentId: deptId },
+              { departmentIds: deptId },
+            ],
+          },
+          "_id",
+        ).lean();
+        for (const u of departmentUsers) {
+          if (u?._id) memberIds.add(u._id.toString());
+        }
+      } catch (_) {}
+    }
+  }
+  if (conversation.type === "broadcast") {
+    for (const p of conversation.broadcastPublisherIds || []) {
+      const pId = p && p._id ? p._id.toString() : p ? p.toString() : "";
+      if (pId) memberIds.add(pId);
+    }
+  }
+  return Array.from(memberIds);
+}
+
 function getTypingKey(conversationId, userId) {
   return `${conversationId}:${userId}`;
 }
 
-function setTyping(io, conversationId, userId) {
+function setTyping(io, conversationId, userId, memberIds = []) {
   const key = getTypingKey(conversationId, userId);
   typingState.set(key, Date.now());
   const existingTimer = typingTimeouts.get(key);
@@ -408,7 +599,13 @@ function setTyping(io, conversationId, userId) {
   const timer = setTimeout(() => {
     typingState.delete(key);
     typingTimeouts.delete(key);
-    io.to(getConversationRoom(conversationId)).emit("stop_typing", {
+    let stopTarget = io.to(getConversationRoom(conversationId));
+    for (const mId of memberIds) {
+      if (mId && mId !== userId) {
+        stopTarget = stopTarget.to(`user:${mId}`);
+      }
+    }
+    stopTarget.emit("stop_typing", {
       conversationId,
       userId,
     });
@@ -457,11 +654,16 @@ function initializeChatSocketServer(httpServer) {
     // Base64 inline transfers (mobile -> desktop save/print) can exceed
     // the default Engine.IO limit (~1MB), which causes silent disconnect/ack timeouts.
     maxHttpBufferSize: SOCKET_MAX_PAYLOAD_BYTES,
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    connectTimeout: 45000,
+    transports: ["websocket", "polling"],
     cors: {
       origin: socketCorsOrigin,
       credentials: true,
     },
   });
+  activeIOInstance = io;
 
   // On server restart, clear stale online flags from previous process lifetime.
   User.updateMany(
@@ -480,6 +682,99 @@ function initializeChatSocketServer(httpServer) {
     },
   ).catch(() => {});
 
+  const scheduleServerRemindersForUser = async (uid) => {
+    const normalizedUid = String(uid || "").trim();
+    if (!normalizedUid) return;
+    const prevTimer = userReminderTimers.get(normalizedUid);
+    if (prevTimer) {
+      clearTimeout(prevTimer);
+      userReminderTimers.delete(normalizedUid);
+    }
+    try {
+      const u = await User.findById(normalizedUid, "messageReminders").lean();
+      const list = Array.isArray(u?.messageReminders) ? u.messageReminders : [];
+      const pending = list.filter((r) => !r.isNotified && r.remindAt);
+      if (!pending.length) return;
+
+      pending.sort(
+        (a, b) =>
+          new Date(a.remindAt).getTime() - new Date(b.remindAt).getTime(),
+      );
+      const nextItem = pending[0];
+      const delayMs = Math.max(
+        250,
+        new Date(nextItem.remindAt).getTime() - Date.now(),
+      );
+      const cappedDelay = Math.min(delayMs, 2147483647);
+
+      const timer = setTimeout(async () => {
+        userReminderTimers.delete(normalizedUid);
+        try {
+          const freshUser = await User.findById(
+            normalizedUid,
+            "messageReminders",
+          ).lean();
+          const currentReminders = Array.isArray(freshUser?.messageReminders)
+            ? freshUser.messageReminders
+            : [];
+          const now = Date.now();
+          let changed = false;
+          const dueItems = [];
+
+          const updatedReminders = currentReminders.map((rem) => {
+            if (!rem.isNotified && new Date(rem.remindAt).getTime() <= now) {
+              changed = true;
+              const notified = { ...rem, isNotified: true };
+              dueItems.push(notified);
+              return notified;
+            }
+            return rem;
+          });
+
+          if (changed) {
+            await User.findByIdAndUpdate(normalizedUid, {
+              $set: { messageReminders: updatedReminders },
+            });
+            io.to(`user:${normalizedUid}`).emit("reminders_updated", {
+              reminders: updatedReminders,
+              dueReminders: dueItems,
+            });
+            for (const due of dueItems) {
+              const title = `⏰ تذكير برسالة من ${due.senderName || "محادثة"}`;
+              const body = due.note
+                ? `${due.note} — "${due.messagePreview || ""}"`
+                : due.messagePreview || "لديك تذكير برسالة مجدولة";
+              sendReminderPushNotifications({
+                recipientUserIds: [normalizedUid],
+                reminder: due,
+                title,
+                body,
+              }).catch(() => {});
+            }
+          }
+          await scheduleServerRemindersForUser(normalizedUid);
+        } catch (_) {}
+      }, cappedDelay);
+
+      userReminderTimers.set(normalizedUid, timer);
+    } catch (_) {}
+  };
+
+  // On server startup/restart, re-arm all pending message reminders across all users
+  User.find(
+    { messageReminders: { $elemMatch: { isNotified: { $ne: true } } } },
+    "_id",
+  )
+    .lean()
+    .then((usersWithReminders) => {
+      for (const u of usersWithReminders || []) {
+        if (u?._id) {
+          scheduleServerRemindersForUser(u._id.toString()).catch(() => {});
+        }
+      }
+    })
+    .catch(() => {});
+
   const sweepInterval = setInterval(() => {
     for (const userId of [...userSockets.keys()]) {
       publishAggregatedPresence(io, userId).catch(() => {});
@@ -494,7 +789,12 @@ function initializeChatSocketServer(httpServer) {
       for (const userId of [...userSockets.keys()]) {
         pruneUserSockets(io, userId);
       }
-      const activeSocketUserIds = [...userSockets.keys()];
+      const activeSocketUserIds = [
+        ...new Set([
+          ...userSockets.keys(),
+          ...pendingOfflineTimers.keys(),
+        ]),
+      ];
       const staleFilter = activeSocketUserIds.length
         ? { isOnline: true, _id: { $nin: activeSocketUserIds } }
         : { isOnline: true };
@@ -514,6 +814,7 @@ function initializeChatSocketServer(httpServer) {
         },
       );
       for (const userId of staleIds) {
+        publishedPresenceState.delete(userId);
         emitPresence(io, userId, false, "offline", {
           lastSeen: new Date().toISOString(),
         });
@@ -542,6 +843,16 @@ function initializeChatSocketServer(httpServer) {
     const currentUser = socket.user;
     socket.join(`user:${currentUser.id}`);
     socket.join("lobby");
+    const canViewMonitor =
+      currentUser.permissions?.canViewSystemMonitor === true ||
+      currentUser.role === "admin";
+    const canManageUpdates = currentUser.permissions?.canManageUpdates === true;
+    if (canViewMonitor) {
+      socket.join("admin:monitor");
+    }
+    if (canViewMonitor || canManageUpdates) {
+      socket.join("admin:updates");
+    }
     registerUserSocket(currentUser.id, socket.id);
     socketPresence.set(socket.id, "online");
     socketClientType.set(socket.id, currentUser.clientType || "unknown");
@@ -575,12 +886,38 @@ function initializeChatSocketServer(httpServer) {
         lastActiveAt: new Date().toISOString(),
       });
       const pendingDeliveries = await markPendingDeliveriesForUser(currentUser);
-      for (const entry of pendingDeliveries) {
-        io.to(getConversationRoom(entry.conversationId)).emit(
-          "message_delivered",
-          entry,
+      if (pendingDeliveries.length > 0) {
+        const pendingConvIds = Array.from(
+          new Set(pendingDeliveries.map((e) => e.conversationId).filter(Boolean)),
         );
+        const pendingConvs = pendingConvIds.length
+          ? await Conversation.find({ _id: { $in: pendingConvIds } })
+              .select("_id members")
+              .lean()
+              .catch(() => [])
+          : [];
+        const convMembersMap = new Map(
+          pendingConvs.map((c) => [c._id.toString(), c.members || []]),
+        );
+        for (const entry of pendingDeliveries) {
+          let deliveryTarget = io.to(getConversationRoom(entry.conversationId));
+          const members = convMembersMap.get(String(entry.conversationId));
+          if (members) {
+            for (const m of members) {
+              const mId = m._id ? m._id.toString() : m.toString();
+              deliveryTarget = deliveryTarget.to(`user:${mId}`);
+            }
+          }
+          deliveryTarget.emit("message_delivered", entry);
+        }
       }
+      try {
+        recordSocketTelemetry(io, socket, "connection", 6, {
+          path: "/socket/connect",
+          label: "🟢 تسجيل اتصال جهاز بالشبكة",
+          statusCode: 200,
+        });
+      } catch (_) {}
     } catch (error) {
       socket.emit("socket_error", {
         message: error?.message || "Socket initialization failed.",
@@ -612,28 +949,59 @@ function initializeChatSocketServer(httpServer) {
       try {
         const conversation = await getConversationById(payload.conversationId);
         await assertConversationAccess(currentUser, conversation);
-        socket.join(getConversationRoom(payload.conversationId));
-        const deliveredMessageIds = await markConversationDelivered(
-          currentUser,
-          payload.conversationId,
+
+        const memberState = await getConversationState(currentUser.id, payload.conversationId);
+        const isBlocked = (conversation.blockedMembers || []).some(
+          (entry) => (entry._id ? entry._id.toString() : entry.toString()) === currentUser.id,
+        ) || memberState?.membershipStatus === "blocked";
+        const isRemoved = memberState?.membershipStatus === "removed" || memberState?.membershipStatus === "left";
+        const isMemberInArray = (conversation.members || []).some(
+          (entry) => (entry._id ? entry._id.toString() : entry.toString()) === currentUser.id,
         );
-        if (deliveredMessageIds.length) {
-          io.to(getConversationRoom(payload.conversationId)).emit(
-            "message_delivered",
-            {
-              conversationId: payload.conversationId,
-              userId: currentUser.id,
-              messageIds: deliveredMessageIds,
-            },
+        const isActiveMember =
+          (isMemberInArray || conversation.type === "department" || conversation.type === "broadcast") &&
+          !isRemoved &&
+          (memberState?.membershipStatus === "active" || !memberState?.membershipStatus);
+
+        let deliveredMessageIds = [];
+        if (isActiveMember && !isBlocked) {
+          socket.join(getConversationRoom(payload.conversationId));
+          deliveredMessageIds = await markConversationDelivered(
+            currentUser,
+            payload.conversationId,
           );
+          if (deliveredMessageIds.length) {
+            const allMemberIds = await getConversationMemberIds(conversation);
+            let deliveryTarget = io.to(getConversationRoom(payload.conversationId));
+            for (const mId of allMemberIds) {
+              deliveryTarget = deliveryTarget.to(`user:${mId}`);
+            }
+            deliveryTarget.emit(
+              "message_delivered",
+              {
+                conversationId: payload.conversationId,
+                userId: currentUser.id,
+                messageIds: deliveredMessageIds,
+              },
+            );
+          }
+        } else {
+          socket.leave(getConversationRoom(payload.conversationId));
         }
+
         socketAck(ack, {
           ok: true,
           success: true,
           data: {
             conversationId: payload.conversationId,
             deliveredMessageIds,
+            isReadOnly: !isActiveMember || isBlocked,
           },
+        });
+        recordSocketTelemetry(io, socket, "join_conversation", 8, {
+          path: "/socket/chat/join",
+          label: "💬 فتح واستعراض محادثة",
+          statusCode: 200,
         });
       } catch (error) {
         socketAck(ack, { ok: false, success: false, error: error.message });
@@ -641,32 +1009,69 @@ function initializeChatSocketServer(httpServer) {
     });
 
     socket.on("leave_conversation", async (payload = {}, ack) => {
-      socket.leave(getConversationRoom(payload.conversationId));
-      clearTyping(payload.conversationId, currentUser.id);
-      socket
-        .to(getConversationRoom(payload.conversationId))
-        .emit("stop_typing", {
+      try {
+        socket.leave(getConversationRoom(payload.conversationId));
+        clearTyping(payload.conversationId, currentUser.id);
+        const conversation = await getConversationById(payload.conversationId);
+        let stopTarget = socket.to(getConversationRoom(payload.conversationId));
+        if (conversation) {
+          const allMemberIds = await getConversationMemberIds(conversation);
+          for (const mId of allMemberIds) {
+            if (mId !== currentUser.id) {
+              stopTarget = stopTarget.to(`user:${mId}`);
+            }
+          }
+        }
+        stopTarget.emit("stop_typing", {
           conversationId: payload.conversationId,
           userId: currentUser.id,
         });
-      socketAck(ack, {
-        ok: true,
-        success: true,
-        data: { conversationId: payload.conversationId },
-      });
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { conversationId: payload.conversationId },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
     });
 
     socket.on("send_message", async (payload = {}, ack) => {
       try {
         clearTyping(payload.conversationId, currentUser.id);
-        socket
-          .to(getConversationRoom(payload.conversationId))
-          .emit("stop_typing", {
-            conversationId: payload.conversationId,
-            userId: currentUser.id,
-          });
+        const conversationPre = await getConversationById(payload.conversationId);
+        let stopTargetPre = socket.to(getConversationRoom(payload.conversationId));
+        if (conversationPre) {
+          const allMemberIdsPre = await getConversationMemberIds(conversationPre);
+          for (const mId of allMemberIdsPre) {
+            if (mId !== currentUser.id) {
+              stopTargetPre = stopTargetPre.to(`user:${mId}`);
+            }
+          }
+        }
+        stopTargetPre.emit("stop_typing", {
+          conversationId: payload.conversationId,
+          userId: currentUser.id,
+        });
         const result = await createMessage(currentUser, payload, null);
         if (result.alreadyExists) {
+          socketAck(ack, {
+            ok: true,
+            success: true,
+            data: {
+              message: result.message,
+              conversation: result.conversation,
+            },
+          });
+          return;
+        }
+
+        const isScheduledFuture =
+          result.message.isScheduled &&
+          result.message.scheduledFor &&
+          new Date(result.message.scheduledFor) > new Date();
+
+        if (isScheduledFuture) {
           socketAck(ack, {
             ok: true,
             success: true,
@@ -691,15 +1096,18 @@ function initializeChatSocketServer(httpServer) {
           );
         }
 
-        const deliveredUsers = [
+        const countRecipients = [
           ...new Set(
-            (result.message.deliveredTo || [])
-              .map((entry) => entry.userId?.toString?.() || entry.userId)
-              .filter(Boolean),
+            [
+              ...(result.recipientUserIds || []),
+              ...(result.message.deliveredTo || []).map(
+                (entry) => entry.userId?.toString?.() || entry.userId,
+              ),
+            ].filter(Boolean),
           ),
         ];
         await Promise.all(
-          deliveredUsers.map((userId) =>
+          countRecipients.map((userId) =>
             emitUnreadCount(io, userId, result.message.conversationId),
           ),
         );
@@ -721,11 +1129,22 @@ function initializeChatSocketServer(httpServer) {
           });
         });
 
+        sendDismissPushNotification({
+          userId: currentUser.id,
+          conversationId: result.message.conversationId,
+        }).catch(() => {});
+
         socketAck(ack, {
           ok: true,
           success: true,
           data: { message: result.message, conversation: result.conversation },
         });
+        recordSocketTelemetry(io, socket, "send_message", 12, {
+          path: "/socket/chat/send_message",
+          label: "💬 إرسال رسالة شات",
+          statusCode: 200,
+        });
+        return;
       } catch (error) {
         socketAck(ack, { ok: false, success: false, error: error.message });
       }
@@ -733,13 +1152,50 @@ function initializeChatSocketServer(httpServer) {
 
     socket.on("typing", async (payload = {}, ack) => {
       try {
+        if (!payload.conversationId) {
+          socketAck(ack, { ok: false, success: false, error: "Missing conversationId" });
+          return;
+        }
         const conversation = await getConversationById(payload.conversationId);
         await assertConversationAccess(currentUser, conversation);
-        setTyping(io, payload.conversationId, currentUser.id);
-        socket.to(getConversationRoom(payload.conversationId)).emit("typing", {
+
+        const memberState = await getConversationState(currentUser.id, payload.conversationId);
+        const isBlocked = (conversation?.blockedMembers || []).some(
+          (m) => (m._id ? m._id.toString() : m.toString()) === currentUser.id,
+        ) || memberState?.membershipStatus === "blocked";
+        const isRemoved = memberState?.membershipStatus === "removed" || memberState?.membershipStatus === "left";
+
+        if (isBlocked || isRemoved || conversation?.isActive === false) {
+          socketAck(ack, { ok: false, success: false, error: "Not allowed" });
+          return;
+        }
+
+        if (conversation.type === "broadcast") {
+          const publisherIds = (conversation.broadcastPublisherIds || []).map((m) =>
+            m._id ? m._id.toString() : m.toString(),
+          );
+          const isPublisher =
+            publisherIds.includes(currentUser.id) ||
+            currentUser.role === "admin" ||
+            (conversation.createdBy && String(conversation.createdBy) === currentUser.id);
+          if (!isPublisher) {
+            socketAck(ack, { ok: false, success: false, error: "Not allowed" });
+            return;
+          }
+        }
+
+        const allMemberIds = await getConversationMemberIds(conversation);
+        setTyping(io, payload.conversationId, currentUser.id, allMemberIds);
+        let typingTarget = socket.to(getConversationRoom(payload.conversationId));
+        for (const mId of allMemberIds) {
+          if (mId !== currentUser.id) {
+            typingTarget = typingTarget.to(`user:${mId}`);
+          }
+        }
+        typingTarget.emit("typing", {
           conversationId: payload.conversationId,
           userId: currentUser.id,
-          fullName: currentUser.fullName,
+          fullName: currentUser.fullName || currentUser.username || "User",
         });
         socketAck(ack, { ok: true, success: true });
       } catch (error) {
@@ -748,14 +1204,30 @@ function initializeChatSocketServer(httpServer) {
     });
 
     socket.on("stop_typing", async (payload = {}, ack) => {
-      clearTyping(payload.conversationId, currentUser.id);
-      socket
-        .to(getConversationRoom(payload.conversationId))
-        .emit("stop_typing", {
+      try {
+        if (!payload.conversationId) {
+          socketAck(ack, { ok: true, success: true });
+          return;
+        }
+        clearTyping(payload.conversationId, currentUser.id);
+        const conversation = await getConversationById(payload.conversationId);
+        let stopTarget = socket.to(getConversationRoom(payload.conversationId));
+        if (conversation) {
+          const allMemberIds = await getConversationMemberIds(conversation);
+          for (const mId of allMemberIds) {
+            if (mId !== currentUser.id) {
+              stopTarget = stopTarget.to(`user:${mId}`);
+            }
+          }
+        }
+        stopTarget.emit("stop_typing", {
           conversationId: payload.conversationId,
           userId: currentUser.id,
         });
-      socketAck(ack, { ok: true, success: true });
+        socketAck(ack, { ok: true, success: true });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
     });
 
     socket.on("message_seen", async (payload = {}, ack) => {
@@ -764,19 +1236,32 @@ function initializeChatSocketServer(httpServer) {
           currentUser,
           payload.conversationId,
         );
-        io.to(getConversationRoom(payload.conversationId)).emit(
-          "message_seen",
-          {
-            conversationId: payload.conversationId,
-            userId: currentUser.id,
-            messageIds,
-          },
-        );
+        const conversation = await getConversationById(payload.conversationId);
+        const allMemberIds = await getConversationMemberIds(conversation);
+
+        let seenTarget = io.to(getConversationRoom(payload.conversationId));
+        for (const mId of allMemberIds) {
+          seenTarget = seenTarget.to(`user:${mId}`);
+        }
+        seenTarget.emit("message_seen", {
+          conversationId: payload.conversationId,
+          userId: currentUser.id,
+          messageIds,
+        });
         await emitUnreadCount(io, currentUser.id, payload.conversationId);
+        sendDismissPushNotification({
+          userId: currentUser.id,
+          conversationId: payload.conversationId,
+        }).catch(() => {});
         socketAck(ack, {
           ok: true,
           success: true,
           data: { messageIds },
+        });
+        recordSocketTelemetry(io, socket, "message_seen", 6, {
+          path: "/socket/chat/seen",
+          label: "✔️ تأكيد قراءة واستلام رسائل",
+          statusCode: 200,
         });
       } catch (error) {
         socketAck(ack, { ok: false, success: false, error: error.message });
@@ -793,34 +1278,43 @@ function initializeChatSocketServer(httpServer) {
     });
 
     socket.on("presence:activity", async (payload = {}, ack) => {
-      const requestedStatus =
-        payload.status === "idle"
-          ? "idle"
-          : payload.status === "meeting"
-            ? "meeting"
-            : payload.status === "lunch"
-              ? "lunch"
-              : payload.status === "offline"
-                ? "offline"
-                : "online";
+      try {
+        const requestedStatus =
+          payload.status === "idle"
+            ? "idle"
+            : payload.status === "meeting"
+              ? "meeting"
+              : payload.status === "lunch"
+                ? "lunch"
+                : payload.status === "offline"
+                  ? "offline"
+                  : "online";
 
-      if (requestedStatus === "offline") {
-        socketPresence.set(socket.id, "offline");
-        await publishAggregatedPresence(io, currentUser.id, {
-          lastSeen: new Date().toISOString(),
+        if (requestedStatus === "offline") {
+          socketPresence.set(socket.id, "offline");
+          await publishAggregatedPresence(io, currentUser.id, {
+            lastSeen: new Date().toISOString(),
+          });
+        } else {
+          socketPresence.set(socket.id, requestedStatus);
+          await publishAggregatedPresence(io, currentUser.id, {
+            lastActiveAt: new Date().toISOString(),
+          });
+        }
+
+        recordSocketTelemetry(io, socket, "presence", 5, {
+          path: "/socket/presence/activity",
+          label: "🟢 نبضة تواجد وتفاعل مباشر",
+          statusCode: 200,
         });
-      } else {
-        socketPresence.set(socket.id, requestedStatus);
-        await publishAggregatedPresence(io, currentUser.id, {
-          lastActiveAt: new Date().toISOString(),
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { status: requestedStatus },
         });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
       }
-
-      socketAck(ack, {
-        ok: true,
-        success: true,
-        data: { status: requestedStatus },
-      });
     });
 
     socket.on("printers:update", (payload = {}, ack) => {
@@ -909,6 +1403,270 @@ function initializeChatSocketServer(httpServer) {
           hasDesktop: getDesktopSocketIds(io, currentUser.id).length > 0,
         },
       });
+    });
+
+    socket.on("clipboard:sync", (payload = {}, ack) => {
+      const rawText = String(payload.text || "").trim();
+      if (!rawText) {
+        socketAck(ack, {
+          ok: false,
+          success: false,
+          error: "النص المراد مزامنته فارغ.",
+        });
+        return;
+      }
+      if (rawText.length > 50000) {
+        socketAck(ack, {
+          ok: false,
+          success: false,
+          error: "حجم النص يتجاوز الحد المسموح به للحافظة الفورية.",
+        });
+        return;
+      }
+
+      const sourceClientType =
+        socketClientType.get(socket.id) ||
+        currentUser.clientType ||
+        normalizeClientType(payload.sourceClientType);
+      const fallbackDeviceName =
+        sourceClientType === "desktop"
+          ? "كمبيوتر المكتب Windows"
+          : sourceClientType === "mobile"
+            ? "هاتف الموبايل"
+            : "جهاز متصل";
+      const sourceDeviceName =
+        String(payload.sourceDeviceName || "")
+          .trim()
+          .slice(0, 120) || fallbackDeviceName;
+
+      const clipItem = {
+        id: `clip_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        text: rawText,
+        sourceClientType,
+        sourceDeviceName,
+        sourceDeviceUid: currentUser.deviceUid || null,
+        autoCopy: payload.autoCopy !== false,
+        createdAt: new Date().toISOString(),
+      };
+
+      const existingHistory = clipboardHistoryByUser.get(currentUser.id) || [];
+      const filteredHistory = existingHistory.filter(
+        (entry) => entry && entry.text !== rawText,
+      );
+      const updatedHistory = [clipItem, ...filteredHistory].slice(0, 20);
+      clipboardHistoryByUser.set(currentUser.id, updatedHistory);
+
+      // Emit to all OTHER sockets of the same user so they copy it immediately
+      recordSocketTelemetry(io, socket, "clipboard_sync", 8, {
+        path: "/socket/clipboard/sync",
+        label: "📋 مزامنة الحافظة الفورية",
+        statusCode: 200,
+      });
+      socket.to(`user:${currentUser.id}`).emit("clipboard_synced", clipItem);
+      // Emit updated history to all sockets of the user
+      io.to(`user:${currentUser.id}`).emit("clipboard_history_updated", {
+        history: updatedHistory,
+        latestItem: clipItem,
+      });
+
+      const deliveryCtx = getUserDeliveryContext(io, currentUser.id);
+      socketAck(ack, {
+        ok: true,
+        success: true,
+        data: {
+          item: clipItem,
+          history: updatedHistory,
+          hasDesktop: deliveryCtx.hasDesktop,
+          hasMobile: deliveryCtx.hasMobile,
+        },
+      });
+    });
+
+    socket.on("clipboard:get_history", (payload = {}, ack) => {
+      const history = clipboardHistoryByUser.get(currentUser.id) || [];
+      const deliveryCtx = getUserDeliveryContext(io, currentUser.id);
+      socketAck(ack, {
+        ok: true,
+        success: true,
+        data: {
+          history,
+          hasDesktop: deliveryCtx.hasDesktop,
+          hasMobile: deliveryCtx.hasMobile,
+        },
+      });
+    });
+
+    socket.on("clipboard:clear_history", (payload = {}, ack) => {
+      clipboardHistoryByUser.delete(currentUser.id);
+      io.to(`user:${currentUser.id}`).emit("clipboard_history_updated", {
+        history: [],
+        latestItem: null,
+      });
+      socketAck(ack, {
+        ok: true,
+        success: true,
+        data: { history: [] },
+      });
+    });
+
+    // ── Quick Replies Cross-Device Sync (Mobile ⇄ Desktop) ─────────────────
+    socket.on("quick_replies:get", async (_payload = {}, ack) => {
+      try {
+        const userDoc = await User.findById(currentUser.id, "quickReplies").lean();
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { quickReplies: userDoc?.quickReplies || [] },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
+    });
+
+    socket.on("quick_replies:sync", async (payload = {}, ack) => {
+      try {
+        const rawList = Array.isArray(payload.quickReplies)
+          ? payload.quickReplies
+          : [];
+        const sanitized = rawList
+          .filter((item) => item && typeof item === "object")
+          .slice(0, 150)
+          .map((item) => ({
+            id: String(item.id || `qr_${Date.now()}`).trim().slice(0, 80),
+            shortcut: String(item.shortcut || "رد").trim().slice(0, 60),
+            title: String(item.title || "رد سريع").trim().slice(0, 120),
+            content: String(item.content || "").trim().slice(0, 4000),
+            category: String(item.category || "عام").trim().slice(0, 60),
+          }))
+          .filter((item) => item.content.length > 0);
+
+        await User.findByIdAndUpdate(currentUser.id, {
+          $set: { quickReplies: sanitized },
+        });
+
+        io.to(`user:${currentUser.id}`).emit("quick_replies_updated", {
+          quickReplies: sanitized,
+          updatedAt: new Date().toISOString(),
+        });
+
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { quickReplies: sanitized },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
+    });
+
+    // ── Message Reminders Cross-Device Sync + Server Push ──────────────────
+    // Ensure server timer is armed when user connects
+    scheduleServerRemindersForUser(currentUser.id).catch(() => {});
+
+    socket.on("reminders:get", async (_payload = {}, ack) => {
+      try {
+        const userDoc = await User.findById(
+          currentUser.id,
+          "messageReminders",
+        ).lean();
+        const userReminders = (userDoc?.messageReminders || [])
+          .filter((item) => !item.userId || String(item.userId) === String(currentUser.id))
+          .map((item) => ({
+            ...item,
+            userId: String(currentUser.id),
+          }));
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { reminders: userReminders },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
+    });
+
+    socket.on("reminders:sync", async (payload = {}, ack) => {
+      try {
+        const rawList = Array.isArray(payload.reminders) ? payload.reminders : [];
+        const sanitized = rawList
+          .filter((item) => item && typeof item === "object")
+          .slice(0, 200)
+          .map((item) => ({
+            id: String(item.id || `rem_${Date.now()}`).trim().slice(0, 80),
+            userId: String(currentUser.id),
+            conversationId: String(item.conversationId || "").trim().slice(0, 80),
+            conversationTitle: String(item.conversationTitle || "")
+              .trim()
+              .slice(0, 160),
+            messageId: String(item.messageId || "").trim().slice(0, 80),
+            senderName: String(item.senderName || "").trim().slice(0, 120),
+            messagePreview: String(item.messagePreview || "")
+              .trim()
+              .slice(0, 1000),
+            remindAt: item.remindAt ? new Date(item.remindAt) : new Date(),
+            createdAt: item.createdAt ? new Date(item.createdAt) : new Date(),
+            note: String(item.note || "").trim().slice(0, 500),
+            isNotified: item.isNotified === true,
+          }))
+          .filter((item) => item.id && item.messageId);
+
+        await User.findByIdAndUpdate(currentUser.id, {
+          $set: { messageReminders: sanitized },
+        });
+
+        io.to(`user:${currentUser.id}`).emit("reminders_updated", {
+          reminders: sanitized,
+          updatedAt: new Date().toISOString(),
+        });
+
+        await scheduleServerRemindersForUser(currentUser.id);
+
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { reminders: sanitized },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
+    });
+
+    // ── Workspace Tasks / Docs Cross-Device Sync (Mobile ⇄ Desktop) ────────
+    socket.on("workspace:get_docs", async (_payload = {}, ack) => {
+      try {
+        const userDoc = await User.findById(currentUser.id, "workspaceDocs").lean();
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { docs: userDoc?.workspaceDocs || [] },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
+    });
+
+    socket.on("workspace:sync_docs", async (payload = {}, ack) => {
+      try {
+        const docs = Array.isArray(payload.docs)
+          ? payload.docs.slice(0, 300)
+          : [];
+        await User.findByIdAndUpdate(currentUser.id, {
+          $set: { workspaceDocs: docs },
+        });
+
+        io.to(`user:${currentUser.id}`).emit("workspace_docs_updated", {
+          docs,
+          updatedAt: new Date().toISOString(),
+        });
+
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { docs },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
     });
 
     socket.on("print_request", (payload = {}, ack) => {
@@ -1063,6 +1821,11 @@ function initializeChatSocketServer(httpServer) {
         availableDesktopSocketCount: allDesktopSocketIds.length,
       });
 
+      recordSocketTelemetry(io, socket, "print_request", 15, {
+        path: "/socket/printers/print_request",
+        label: "🖨️ أمر طباعة مستند",
+        statusCode: 200,
+      });
       printJobOwnerById.set(jobId, currentUser.id);
       io.to(targetDesktopSocketId).emit("print_job_requested", printJob);
 
@@ -1229,7 +1992,13 @@ function initializeChatSocketServer(httpServer) {
         }
       }
 
-      if (!inlineFileBase64 && transferMeta) {
+      // Only inline if the file is tiny (<= 64KB). For anything larger, keep downloadUrl so clients download via HTTP stream.
+      const shouldInline =
+        !inlineFileBase64 &&
+        transferMeta &&
+        Number(transferMeta.fileSize || 0) > 0 &&
+        Number(transferMeta.fileSize || 0) <= 64 * 1024;
+      if (shouldInline) {
         const inlinePayload = await buildInlineTransferPayload(
           transferMeta,
           currentUser.role,
@@ -1293,6 +2062,11 @@ function initializeChatSocketServer(httpServer) {
         ok: true,
         success: true,
         data: { jobId, forwardedTo: desktopSocketIds.length },
+      });
+      recordSocketTelemetry(io, socket, "file_save_request", 15, {
+        path: "/socket/files/save",
+        label: "📁 إرسال ملف للكمبيوتر",
+        statusCode: 200,
       });
     });
 
@@ -1390,6 +2164,11 @@ function initializeChatSocketServer(httpServer) {
         ok: true,
         success: true,
         data: { jobId, forwardedTo: mobileSocketIds.length },
+      });
+      recordSocketTelemetry(io, socket, "file_receive_request", 15, {
+        path: "/socket/files/receive",
+        label: "📥 استقبال ملف على الموبايل",
+        statusCode: 200,
       });
     });
 
@@ -1515,16 +2294,164 @@ function initializeChatSocketServer(httpServer) {
         }
       }
 
-      await publishAggregatedPresence(io, currentUser.id, {
-        lastSeen: new Date().toISOString(),
-      });
+      const remainingSockets = userSockets.get(currentUser.id);
+      if (remainingSockets && remainingSockets.size > 0) {
+        await publishAggregatedPresence(io, currentUser.id, {
+          lastSeen: new Date().toISOString(),
+        });
+      } else {
+        scheduleOfflineGracePublish(io, currentUser.id);
+      }
     });
   });
 
   return io;
 }
 
+function getLiveSocketMetrics() {
+  const io = activeIOInstance;
+  let liveSocketCount = 0;
+  if (io?.sockets?.sockets) {
+    if (typeof io.sockets.sockets.size === "number") {
+      liveSocketCount = io.sockets.sockets.size;
+    } else if (typeof io.sockets.sockets === "object") {
+      liveSocketCount = Object.keys(io.sockets.sockets).length;
+    }
+  } else {
+    for (const sockets of userSockets.values()) {
+      liveSocketCount += sockets.size;
+    }
+  }
+
+  const liveUserCount = userSockets.size;
+
+  return {
+    liveSocketCount,
+    liveUserCount,
+    isSocketConnected(socketId) {
+      if (!socketId) return false;
+      return hasLiveSocketId(io, String(socketId));
+    },
+    isUserOnline(userId) {
+      if (!userId) return false;
+      const uid = String(userId._id || userId);
+      const sockets = userSockets.get(uid);
+      if (!sockets || !sockets.size) return false;
+      if (!io) return sockets.size > 0;
+      for (const sId of sockets) {
+        if (hasLiveSocketId(io, sId)) return true;
+      }
+      return false;
+    },
+  };
+}
+
+function getUserConnectedSocketsSnapshot(userId) {
+  const io = activeIOInstance;
+  const uid = String(userId?._id || userId || "").trim();
+  if (!uid || !io?.sockets?.sockets) {
+    return [];
+  }
+  const socketIds = pruneUserSockets(io, uid);
+  const result = [];
+  for (const socketId of socketIds) {
+    const sock =
+      typeof io.sockets.sockets.get === "function"
+        ? io.sockets.sockets.get(socketId)
+        : io.sockets.sockets[socketId];
+    if (!sock) continue;
+    result.push({
+      socketId,
+      deviceUid: sock.user?.deviceUid || null,
+      clientType:
+        sock.user?.clientType || socketClientType.get(socketId) || "unknown",
+      ipAddress: sock.user?.ipAddress || null,
+      deviceInfo: sock.user?.deviceInfo || {},
+      presenceStatus: socketPresence.get(socketId) || "online",
+    });
+  }
+  return result;
+}
+
+function forceLogoutUserDevices(
+  ioInstance,
+  userId,
+  { targetDeviceUid = null, excludeDeviceUid = null, reason = "session_revoked" } = {},
+) {
+  const io = ioInstance || activeIOInstance;
+  const uid = String(userId?._id || userId || "").trim();
+  if (!io || !uid) {
+    return 0;
+  }
+
+  const normalizedTarget = targetDeviceUid ? String(targetDeviceUid).trim() : null;
+  const normalizedExclude = excludeDeviceUid ? String(excludeDeviceUid).trim() : null;
+  const payload = {
+    reason,
+    targetDeviceUid: normalizedTarget,
+    excludeDeviceUid: normalizedExclude,
+    at: new Date().toISOString(),
+  };
+
+  // Emit to user room with targetDeviceUid / excludeDeviceUid filter metadata
+  io.to(`user:${uid}`).emit("force_logout", payload);
+
+  // Also explicitly disconnect matching live sockets when deviceUid is known on socket
+  let disconnectedCount = 0;
+  if (io.sockets?.sockets) {
+    const socketIds = pruneUserSockets(io, uid);
+    for (const socketId of socketIds) {
+      const sock =
+        typeof io.sockets.sockets.get === "function"
+          ? io.sockets.sockets.get(socketId)
+          : io.sockets.sockets[socketId];
+      if (!sock) continue;
+      const sockDeviceUid = sock.user?.deviceUid
+        ? String(sock.user.deviceUid).trim()
+        : null;
+      if (!sockDeviceUid) continue;
+
+      const shouldDisconnect = normalizedTarget
+        ? sockDeviceUid === normalizedTarget
+        : normalizedExclude
+          ? sockDeviceUid !== normalizedExclude
+          : true;
+
+      if (shouldDisconnect) {
+        disconnectedCount += 1;
+        try {
+          sock.emit("force_logout", payload);
+          setTimeout(() => {
+            try {
+              sock.disconnect(true);
+            } catch (_) {}
+          }, 120);
+        } catch (_) {}
+      }
+    }
+  }
+
+  return disconnectedCount;
+}
+
 module.exports = {
   initializeChatSocketServer,
   getUserDeliveryContext,
+  getLiveSocketMetrics,
+  getUserConnectedSocketsSnapshot,
+  forceLogoutUserDevices,
+  emitMessageToRecipients,
+  emitConversationToUsers,
+  emitConversationToMembers,
+  leaveUserFromConversationRoom,
+  _presenceGrace: {
+    registerUserSocket,
+    unregisterUserSocket,
+    scheduleOfflineGracePublish,
+    cancelPendingOfflinePublish,
+    publishAggregatedPresence,
+    pendingOfflineTimers,
+    publishedPresenceState,
+    userSockets,
+  },
 };

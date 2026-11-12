@@ -1,4 +1,5 @@
 const fs = require("fs");
+const path = require("path");
 const logger = require("../utils/logger");
 const ConversationMemberState = require("../chat/models/conversation-member-state.model");
 
@@ -42,6 +43,36 @@ function loadServiceAccountFromEnv() {
     return JSON.parse(fs.readFileSync(rawPath, "utf8"));
   }
 
+  // Check fallback locations: DATA_DIR, exe directory, working directory
+  const candidateDirs = [
+    process.env.DATA_DIR,
+    path.dirname(process.execPath || ""),
+    process.cwd(),
+    path.resolve(__dirname, "../..")
+  ].filter(Boolean);
+
+  const candidateFilenames = [
+    "ismart-messenger-firebase-adminsdk-fbsvc-4ab072fea4.json",
+    "firebase-service-account.json"
+  ];
+
+  for (const dir of candidateDirs) {
+    for (const filename of candidateFilenames) {
+      const fullCandidate = path.join(dir, filename);
+      if (fs.existsSync(fullCandidate)) {
+        try {
+          return JSON.parse(fs.readFileSync(fullCandidate, "utf8"));
+        } catch (_) {}
+      }
+    }
+  }
+
+  try {
+    return require("../../ismart-messenger-firebase-adminsdk-fbsvc-4ab072fea4.json");
+  } catch (err) {
+    // ignore
+  }
+
   return null;
 }
 
@@ -83,7 +114,7 @@ function getMessaging() {
 }
 
 function buildChatBody(message) {
-  const content = String(message?.content || "").trim();
+  const content = String(message?.content || "").replace(/[\r\n]+/g, " ").trim();
   if (content) {
     return content.slice(0, 160);
   }
@@ -204,11 +235,13 @@ async function sendChatPushNotifications({
 
   if (allowedUserIds.length > 0 && conversation && message) {
     const mentions = message.metadata?.mentions || [];
+    const now = new Date();
     const memberStates = await ConversationMemberState.find(
       {
         conversationId: conversation._id || conversation.id,
         userId: { $in: allowedUserIds },
         isMuted: true,
+        $or: [{ mutedUntil: null }, { mutedUntil: { $gt: now } }],
       },
       "userId"
     ).lean();
@@ -236,41 +269,15 @@ async function sendChatPushNotifications({
     {
       userId: { $in: allowedUserIds },
       isActive: true,
+      isLoggedOut: { $ne: true },
       token: { $ne: null },
     },
-    "userId token platform notificationToneId isLoggedOut unreadSinceLogout"
+    "userId token platform notificationToneId"
   ).lean();
 
-  const loggedInDevices = [];
-  
-  for (const device of devices) {
-    if (device.isLoggedOut) {
-      const newUnreadCount = (device.unreadSinceLogout || 0) + 1;
-      if (newUnreadCount >= 5) {
-        try {
-          await messaging.send({
-            token: device.token,
-            notification: {
-              title: "لديك رسائل غير مقروءة",
-              body: "سجل الدخول لمشاهدة الرسائل الجديدة والمهمة.",
-            },
-            data: { type: "logged_out_alert" }
-          });
-        } catch (e) {
-          // ignore
-        }
-        await PushDevice.updateOne({ _id: device._id }, { $set: { unreadSinceLogout: 0 } });
-      } else {
-        await PushDevice.updateOne({ _id: device._id }, { $inc: { unreadSinceLogout: 1 } });
-      }
-    } else {
-      loggedInDevices.push(device);
-    }
-  }
-
-  const deviceGroups = groupPushDevicesByAndroidChannel(loggedInDevices);
+  const deviceGroups = groupPushDevicesByAndroidChannel(devices);
   const uniqueTokens = [
-    ...new Set(loggedInDevices.map((entry) => String(entry.token || "").trim()).filter(Boolean)),
+    ...new Set(devices.map((entry) => String(entry.token || "").trim()).filter(Boolean)),
   ];
   if (uniqueTokens.length === 0) {
     return {
@@ -294,6 +301,8 @@ async function sendChatPushNotifications({
         ? androidChannelIdForToneId(firstDevice.notificationToneId)
         : null;
 
+    const convId = String(message?.conversationId || conversation?.id || "").trim();
+
     for (let index = 0; index < groupTokens.length; index += 500) {
       const batch = groupTokens.slice(index, index + 500);
       const response = await messaging.sendEachForMulticast({
@@ -304,21 +313,23 @@ async function sendChatPushNotifications({
         },
         data: {
           type: "chat",
-          conversationId:
-            String(message?.conversationId || conversation?.id || "").trim(),
+          conversationId: convId,
           messageId: String(message?.id || "").trim(),
           senderId: String(message?.senderId || "").trim(),
         },
         android: {
           priority: "high",
+          collapseKey: `chat_${convId}`,
           notification: {
             channelId: androidChannelId || "chat_messages_default_v1",
             priority: "high",
+            tag: `chat_${convId}`,
           },
         },
         apns: {
           headers: {
             "apns-priority": "10",
+            "apns-collapse-id": `chat_${convId}`,
           },
           payload: {
             aps: {
@@ -439,6 +450,7 @@ async function sendChatReactionPushNotifications({
           notification: {
             channelId: androidChannelId || "chat_messages_default_v1",
             priority: "high",
+            tag: `chat_${String(conversationId || "").trim()}`,
           },
         },
         apns: {
@@ -553,6 +565,7 @@ async function sendTicketPushNotifications({
           notification: {
             channelId: androidChannelId || "chat_messages_default_v1",
             priority: "high",
+            tag: `ticket_${ticketId}`,
           },
         },
         apns: {
@@ -631,17 +644,21 @@ async function registerPushDevice(actor, payload = {}) {
 
 async function unregisterPushDevice(actor, payload = {}) {
   const token = String(payload.token || "").trim();
-  if (!token) {
+  const deviceId = String(payload.deviceId || "").trim();
+  const query = { userId: actor.id };
+  if (token) {
+    query.token = token;
+  } else if (deviceId) {
+    query.deviceId = deviceId;
+  } else {
     return false;
   }
 
   await PushDevice.updateMany(
-    {
-      userId: actor.id,
-      token,
-    },
+    query,
     {
       $set: {
+        isActive: false,
         isLoggedOut: true,
         unreadSinceLogout: 0,
       },
@@ -650,10 +667,164 @@ async function unregisterPushDevice(actor, payload = {}) {
   return true;
 }
 
+async function sendDismissPushNotification({
+  userId = "",
+  conversationId = "",
+} = {}) {
+  const messaging = getMessaging();
+  if (!messaging) {
+    return;
+  }
+  const uid = normalizeUserId(userId);
+  const convId = String(conversationId || "").trim();
+  if (!uid || !convId) {
+    return;
+  }
+
+  const devices = await PushDevice.find(
+    {
+      userId: uid,
+      isActive: true,
+      isLoggedOut: { $ne: true },
+      token: { $ne: null },
+    },
+    "token platform"
+  ).lean();
+
+  const uniqueTokens = [
+    ...new Set(devices.map((d) => String(d.token || "").trim()).filter(Boolean)),
+  ];
+  if (uniqueTokens.length === 0) {
+    return;
+  }
+
+  for (let index = 0; index < uniqueTokens.length; index += 500) {
+    const batch = uniqueTokens.slice(index, index + 500);
+    try {
+      await messaging.sendEachForMulticast({
+        tokens: batch,
+        data: {
+          type: "dismiss_chat",
+          conversationId: convId,
+        },
+        android: {
+          priority: "high",
+          collapseKey: `chat_${convId}`,
+        },
+        apns: {
+          headers: {
+            "apns-priority": "5",
+            "apns-push-type": "background",
+            "apns-collapse-id": `chat_${convId}`,
+          },
+          payload: {
+            aps: {
+              contentAvailable: true,
+            },
+          },
+        },
+      });
+    } catch (_) {}
+  }
+}
+
+async function sendReminderPushNotifications({
+  recipientUserIds = [],
+  reminder = null,
+  title = "⏰ تذكير برسالة",
+  body = "",
+} = {}) {
+  const messaging = getMessaging();
+  if (!messaging) {
+    return { enabled: false, sentCount: 0, skippedCount: recipientUserIds.length };
+  }
+
+  const userIds = normalizeUserIds(recipientUserIds);
+  if (userIds.length === 0) {
+    return { enabled: true, sentCount: 0, skippedCount: 0 };
+  }
+
+  const devices = await PushDevice.find(
+    {
+      userId: { $in: userIds },
+      isActive: true,
+      isLoggedOut: { $ne: true },
+      token: { $ne: null },
+    },
+    "userId token platform notificationToneId"
+  ).lean();
+
+  const deviceGroups = groupPushDevicesByAndroidChannel(devices);
+  const uniqueTokens = [
+    ...new Set(devices.map((entry) => String(entry.token || "").trim()).filter(Boolean)),
+  ];
+  if (uniqueTokens.length === 0) {
+    return { enabled: true, sentCount: 0, skippedCount: userIds.length };
+  }
+
+  const conversationId = String(reminder?.conversationId || "").trim();
+  const messageId = String(reminder?.messageId || "").trim();
+
+  for (const deviceGroup of deviceGroups) {
+    const groupTokens = [
+      ...new Set(deviceGroup.map((entry) => String(entry.token || "").trim()).filter(Boolean)),
+    ];
+    const firstDevice = deviceGroup[0] || {};
+    const androidChannelId =
+      normalizePlatform(firstDevice.platform) === "android"
+        ? androidChannelIdForToneId(firstDevice.notificationToneId)
+        : null;
+
+    for (let index = 0; index < groupTokens.length; index += 500) {
+      const batch = groupTokens.slice(index, index + 500);
+      try {
+        await messaging.sendEachForMulticast({
+          tokens: batch,
+          notification: {
+            title: String(title).slice(0, 120),
+            body: String(body).slice(0, 160),
+          },
+          data: {
+            type: "chat_reminder",
+            conversationId,
+            messageId,
+            reminderId: String(reminder?.id || "").trim(),
+            title: String(title).slice(0, 120),
+            body: String(body).slice(0, 160),
+          },
+          android: {
+            priority: "high",
+            notification: {
+              channelId: androidChannelId || "chat_messages_default_v1",
+              priority: "high",
+              tag: `reminder_${messageId || conversationId}`,
+            },
+          },
+          apns: {
+            headers: {
+              "apns-priority": "10",
+            },
+            payload: {
+              aps: {
+                sound: "default",
+                contentAvailable: true,
+              },
+            },
+          },
+        });
+      } catch (_) {}
+    }
+  }
+
+  return { enabled: true, sentCount: uniqueTokens.length, skippedCount: 0 };
+}
+
 module.exports = {
   registerPushDevice,
   unregisterPushDevice,
   sendChatPushNotifications,
   sendChatReactionPushNotifications,
   sendTicketPushNotifications,
+  sendReminderPushNotifications,
+  sendDismissPushNotification,
 };

@@ -5,6 +5,7 @@ global.TextDecoder = TextDecoder;
 util.TextEncoder = TextEncoder;
 util.TextDecoder = TextDecoder;
 
+const path = require("path");
 const express = require("express");
 const compression = require("compression");
 const cors = require("cors");
@@ -20,6 +21,7 @@ const {
 } = require("./config/env");
 const { getDatabaseStatus } = require("./config/database");
 const { getRedisStatus } = require("./config/redis");
+const { requestTelemetryMiddleware } = require("./middleware/request-telemetry.middleware");
 const authRoutes = require("./routes/auth.routes");
 const documentRoutes = require("./routes/document.routes");
 const userRoutes = require("./routes/user.routes");
@@ -83,8 +85,35 @@ app.use(
     origin: buildCorsOrigin(),
   }),
 );
-app.use(compression());
+app.use(
+  compression({
+    filter: (req, res) => {
+      if (req.headers["x-no-compression"] || res.getHeader("x-no-compression")) {
+        return false;
+      }
+      const reqUrl = String(req.originalUrl || req.url || "").toLowerCase();
+      if (
+        reqUrl.includes("/download") ||
+        reqUrl.includes("/api/updates/releases") ||
+        reqUrl.includes("/api/chat/transfers")
+      ) {
+        return false;
+      }
+      const contentType = String(res.getHeader("Content-Type") || "").toLowerCase();
+      if (
+        contentType.includes("octet-stream") ||
+        contentType.includes("zip") ||
+        contentType.includes("x-msdownload") ||
+        contentType.includes("vnd.android.package-archive")
+      ) {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
+  }),
+);
 app.use(helmet());
+app.use(requestTelemetryMiddleware);
 app.use(
   morgan(":method :safe-url :status :response-time ms - :res[content-length]", {
     skip: (req) =>
@@ -94,14 +123,21 @@ app.use(
       ),
   }),
 );
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 app.use(
   "/api",
   rateLimit({
     windowMs: 60 * 1000,
-    max: 600,
+    max: 3000,
+    keyGenerator: (req) => {
+      const auth = req.headers.authorization;
+      if (auth && typeof auth === "string" && auth.startsWith("Bearer ")) {
+        return "user_" + auth.slice(-32);
+      }
+      return req.ip;
+    },
     skip: (req) =>
       req.method === "POST" &&
       /^\/api\/updates\/tasks\/[a-f0-9]{24}\/progress$/i.test(
@@ -118,18 +154,28 @@ app.use(
 
 // Increase timeout for upload endpoints
 app.use("/api/admin/updates/releases", (req, res, next) => {
-  req.setTimeout(15 * 60 * 1000); // 15 minutes for releases upload
-  res.setTimeout(15 * 60 * 1000);
+  req.setTimeout(60 * 60 * 1000); // 60 minutes for large release uploads over VPN
+  res.setTimeout(60 * 60 * 1000);
   next();
 });
 app.use("/api/updates", (req, res, next) => {
-  req.setTimeout(10 * 60 * 1000); // 10 minutes for update endpoints
-  res.setTimeout(10 * 60 * 1000);
+  req.setTimeout(60 * 60 * 1000); // 60 minutes for slow branch VPN downloads
+  res.setTimeout(60 * 60 * 1000);
   next();
 });
 app.use("/api/chat/transfers", (req, res, next) => {
-  req.setTimeout(15 * 60 * 1000);
-  res.setTimeout(15 * 60 * 1000);
+  req.setTimeout(30 * 60 * 1000);
+  res.setTimeout(30 * 60 * 1000);
+  next();
+});
+app.use("/api/chat/messages", (req, res, next) => {
+  req.setTimeout(30 * 60 * 1000);
+  res.setTimeout(30 * 60 * 1000);
+  next();
+});
+app.use("/api/documents", (req, res, next) => {
+  req.setTimeout(30 * 60 * 1000);
+  res.setTimeout(30 * 60 * 1000);
   next();
 });
 
@@ -138,6 +184,10 @@ app.get("/", (req, res) => {
     status: "ok",
     service: "workplace-document-backend",
   });
+});
+
+app.get("/privacy-policy", (req, res) => {
+  res.sendFile(path.join(__dirname, "assets", "privacy-policy.html"));
 });
 
 app.get("/health", (req, res) => {
@@ -185,6 +235,8 @@ app.use("/api/admin/tickets", ticketRoutes);
 app.use("/api/printers", printerRoutes);
 app.use("/api/admin/printers", printerRoutes);
 app.use("/api/purchase-requests", purchasingRoutes);
+app.use("/api/report-templates", require("./reports/routes/report-template.routes"));
+app.use("/api/admin/report-templates", require("./reports/routes/report-template.routes"));
 
 app.use(notFoundHandler);
 app.use(errorHandler);

@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -51,6 +53,15 @@ class _AuthenticatedAttachmentImageState
   }
 
   Future<Uint8List> _loadBytes() {
+    final localPath = widget.message.metadata?['localFilePath']?.toString();
+    if (localPath != null && localPath.isNotEmpty && !kIsWeb) {
+      try {
+        final f = File(localPath);
+        if (f.existsSync()) {
+          return f.readAsBytes();
+        }
+      } catch (_) {}
+    }
     return ref
         .read(chatRepositoryProvider)
         .fetchAttachmentPreviewBytes(widget.message);
@@ -105,11 +116,22 @@ class _AuthenticatedAttachmentImageState
             ),
           );
         }
+        final isAnimated = _isAnimated(widget.message, bytes);
+        final dpr = MediaQuery.devicePixelRatioOf(context).clamp(1.0, 2.0);
+        final targetW = isAnimated
+            ? null
+            : (widget.width != null ? (widget.width! * dpr).round() : 800);
+        final targetH = isAnimated
+            ? null
+            : (widget.height != null ? (widget.height! * dpr).round() : null);
         return Image.memory(
           bytes,
           width: widget.width,
           height: widget.height,
+          cacheWidth: targetW,
+          cacheHeight: targetH,
           fit: widget.fit,
+          gaplessPlayback: true,
           errorBuilder: (_, __, ___) => SizedBox(
             width: widget.width,
             height: widget.height,
@@ -118,6 +140,38 @@ class _AuthenticatedAttachmentImageState
         );
       },
     );
+  }
+
+  bool _isAnimated(ChatMessage message, Uint8List bytes) {
+    if (message.isStickerMessage) {
+      return true;
+    }
+    final mime = message.mimeType?.toLowerCase().trim() ?? '';
+    final name = message.fileName?.toLowerCase().trim() ?? '';
+    if (mime == 'image/gif' ||
+        mime == 'image/webp' ||
+        name.endsWith('.gif') ||
+        name.endsWith('.webp')) {
+      return true;
+    }
+    if (bytes.length >= 3 &&
+        bytes[0] == 0x47 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46) {
+      return true;
+    }
+    if (bytes.length >= 12 &&
+        bytes[0] == 0x52 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x46 &&
+        bytes[8] == 0x57 &&
+        bytes[9] == 0x45 &&
+        bytes[10] == 0x42 &&
+        bytes[11] == 0x50) {
+      return true;
+    }
+    return false;
   }
 
   bool _isSvgMessage(ChatMessage message, Uint8List bytes) {

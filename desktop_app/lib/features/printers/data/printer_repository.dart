@@ -160,6 +160,8 @@ class PrinterRepository {
     int? fromYear,
     int? toMonth,
     int? toYear,
+    String? templateId,
+    int? sheetsPerClient,
   }) async {
     final response = await _apiClient.dio.get<dynamic>(
       '/api/printers/reports/export',
@@ -172,6 +174,9 @@ class PrinterRepository {
         if (fromYear != null) 'fromYear': fromYear,
         if (toMonth != null) 'toMonth': toMonth,
         if (toYear != null) 'toYear': toYear,
+        if (templateId != null && templateId.trim().isNotEmpty)
+          'templateId': templateId.trim(),
+        if (sheetsPerClient != null) 'sheetsPerClient': sheetsPerClient,
       },
       options: Options(responseType: ResponseType.bytes),
     );
@@ -192,9 +197,14 @@ class PrinterRepository {
     );
   }
 
-  Future<void> exportPrinterReport(String printerId, {int? month, int? year}) {
+  Future<void> exportPrinterReport(
+    String printerId, {
+    String format = 'pdf',
+    int? month,
+    int? year,
+  }) {
     return exportReport(
-      format: 'pdf',
+      format: format,
       type: 'printer',
       printerId: printerId,
       fromMonth: month,
@@ -219,6 +229,7 @@ class PrinterRepository {
     int? fromYear,
     int? toMonth,
     int? toYear,
+    int? sheetsPerClient,
     bool forceRefresh = false,
   }) async {
     final key = ConsumptionRequestKey(
@@ -228,6 +239,7 @@ class PrinterRepository {
       fromYear: fromYear,
       toMonth: toMonth,
       toYear: toYear,
+      sheetsPerClient: sheetsPerClient,
     );
 
     if (!forceRefresh) {
@@ -257,6 +269,7 @@ class PrinterRepository {
             if (fromYear != null) 'fromYear': fromYear,
             if (toMonth != null) 'toMonth': toMonth,
             if (toYear != null) 'toYear': toYear,
+            if (sheetsPerClient != null) 'sheetsPerClient': sheetsPerClient,
           },
         );
         final result = _body(response.data);
@@ -306,6 +319,7 @@ class ConsumptionRequestKey {
     this.fromYear,
     this.toMonth,
     this.toYear,
+    this.sheetsPerClient,
   });
 
   final String? branchId;
@@ -314,6 +328,7 @@ class ConsumptionRequestKey {
   final int? fromYear;
   final int? toMonth;
   final int? toYear;
+  final int? sheetsPerClient;
 
   @override
   bool operator ==(Object other) =>
@@ -325,9 +340,10 @@ class ConsumptionRequestKey {
           fromMonth == other.fromMonth &&
           fromYear == other.fromYear &&
           toMonth == other.toMonth &&
-          toYear == other.toYear;
+          toYear == other.toYear &&
+          sheetsPerClient == other.sheetsPerClient;
 
   @override
   int get hashCode =>
-      Object.hash(branchId, printerId, fromMonth, fromYear, toMonth, toYear);
+      Object.hash(branchId, printerId, fromMonth, fromYear, toMonth, toYear, sheetsPerClient);
 }

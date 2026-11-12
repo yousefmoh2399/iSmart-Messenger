@@ -81,11 +81,13 @@ class AppDownloadProgressBanner extends StatelessWidget {
     required this.fileName,
     required this.progress,
     this.icon = Icons.download_rounded,
+    this.onCancel,
   });
 
   final String? fileName;
   final double progress;
   final IconData icon;
+  final VoidCallback? onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -144,6 +146,17 @@ class AppDownloadProgressBanner extends StatelessWidget {
                   ],
                 ),
               ),
+              if (onCancel != null) ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: onCancel,
+                  icon: const Icon(Icons.close_rounded, size: 20),
+                  tooltip: 'إلغاء التنزيل',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
             ],
           ),
         ),

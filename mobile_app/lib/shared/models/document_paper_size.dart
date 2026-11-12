@@ -8,6 +8,13 @@ extension DocumentPaperSizeLabels on DocumentPaperSize {
     DocumentPaperSize.auto => 'تلقائي (بدون هوامش)',
   };
 
+  String get shortLabel => switch (this) {
+    DocumentPaperSize.a4 => 'A4',
+    DocumentPaperSize.idCard => 'هوية',
+    DocumentPaperSize.receipt => 'إيصال',
+    DocumentPaperSize.auto => 'تلقائي',
+  };
+
   static DocumentPaperSize fromName(String? name) {
     if (name == null) return DocumentPaperSize.auto;
     return DocumentPaperSize.values.firstWhere(

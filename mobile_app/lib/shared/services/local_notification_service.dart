@@ -1,20 +1,158 @@
+import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/config/api_base_url_store.dart';
 import '../../core/settings/user_preferences.dart';
+import '../../core/settings/user_preferences_store.dart';
 import 'permission_request_coordinator.dart';
 
 @pragma('vm:entry-point')
-void onDidReceiveBackgroundNotificationResponse(
+Future<void> onDidReceiveBackgroundNotificationResponse(
   NotificationResponse response,
-) {}
+) async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final input = response.input?.trim();
+  final actionId = response.actionId;
+  debugPrint('[BgNotificationReply] Received notification action: $actionId, input: "$input"');
+
+  if (actionId != 'reply_action' || input == null || input.isEmpty) {
+    debugPrint('[BgNotificationReply] Ignored: not a valid reply action or empty input');
+    return;
+  }
+  final payloadStr = response.payload;
+  if (payloadStr == null || payloadStr.isEmpty) {
+    debugPrint('[BgNotificationReply] Aborting: payload is empty');
+    return;
+  }
+
+  Map<String, dynamic> payload = {};
+  try {
+    final decoded = jsonDecode(payloadStr);
+    if (decoded is Map) {
+      payload = Map<String, dynamic>.from(decoded);
+    }
+  } catch (e) {
+    debugPrint('[BgNotificationReply] Failed to decode payload JSON: $e');
+    return;
+  }
+
+  final conversationId = payload['conversationId']?.toString().trim();
+  if (conversationId == null || conversationId.isEmpty) {
+    debugPrint('[BgNotificationReply] Aborting: conversationId missing in payload');
+    return;
+  }
+
+  try {
+    final prefs = await SharedPreferences.getInstance();
+
+    // 1. Resolve Auth Token reliably across SharedPreferences and FlutterSecureStorage
+    String? token;
+    final sessionV1 = prefs.getString('auth_session_v1');
+    if (sessionV1 != null && sessionV1.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(sessionV1);
+        if (decoded is Map) {
+          token = decoded['accessToken']?.toString();
+        }
+      } catch (_) {}
+    }
+    token ??= prefs.getString('auth_token');
+    if (token == null || token.isEmpty) {
+      final legacySession = prefs.getString('auth_session');
+      if (legacySession != null && legacySession.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(legacySession);
+          if (decoded is Map) {
+            token = decoded['accessToken']?.toString();
+          }
+        } catch (_) {}
+      }
+    }
+    if (token == null || token.isEmpty) {
+      try {
+        const secureStorage = FlutterSecureStorage();
+        final secureSession = await secureStorage.read(key: 'auth_session_v1');
+        if (secureSession != null && secureSession.isNotEmpty) {
+          final decoded = jsonDecode(secureSession);
+          if (decoded is Map) {
+            token = decoded['accessToken']?.toString();
+          }
+        }
+        token ??= await secureStorage.read(key: 'auth_token');
+      } catch (e) {
+        debugPrint('[BgNotificationReply] FlutterSecureStorage error: $e');
+      }
+    }
+    if (token == null || token.isEmpty) {
+      debugPrint('[BgNotificationReply] Aborting: no authenticated token found');
+      return;
+    }
+
+    // 2. Resolve Base URL reliably using ApiBaseUrlStore
+    final baseUrl = await ApiBaseUrlStore().load();
+    debugPrint('[BgNotificationReply] Base URL: $baseUrl | Posting for conv: $conversationId');
+
+    // 3. Post message to backend with badCertificateCallback and timeouts
+    final uri = Uri.parse('${baseUrl.replaceAll(RegExp(r'/+$'), '')}/api/chat/messages');
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15)
+      ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+
+    final request = await client.postUrl(uri);
+    request.headers.contentType = ContentType.json;
+    request.headers.set('Authorization', 'Bearer $token');
+    final clientMsgId = 'bg_reply_${DateTime.now().millisecondsSinceEpoch}';
+    final requestBody = <String, dynamic>{
+      'conversationId': conversationId,
+      'content': input,
+      'messageType': 'text',
+      'clientMessageId': clientMsgId,
+    };
+    final replyToMessageId = payload['messageId']?.toString().trim();
+    if (replyToMessageId != null && replyToMessageId.isNotEmpty) {
+      requestBody['replyToMessageId'] = replyToMessageId;
+    }
+
+    request.write(jsonEncode(requestBody));
+    final res = await request.close().timeout(const Duration(seconds: 15));
+    final resBody = await utf8.decodeStream(res).timeout(const Duration(seconds: 5));
+    debugPrint('[BgNotificationReply] Server HTTP ${res.statusCode}: $resBody');
+    client.close();
+  } catch (e, stack) {
+    debugPrint('[BgNotificationReply] Exception during send: $e\n$stack');
+  } finally {
+    // Always dismiss notification and summary to stop Android's infinite progress spinner!
+    try {
+      final plugin = FlutterLocalNotificationsPlugin();
+      if (response.id != null) {
+        await plugin.cancel(response.id!);
+      }
+      final notifIdFromPayload = int.tryParse(payload['notificationId']?.toString() ?? '');
+      if (notifIdFromPayload != null && notifIdFromPayload != response.id) {
+        await plugin.cancel(notifIdFromPayload);
+      }
+      final summaryId = (conversationId.hashCode.abs() % 800000) + 1000000;
+      await plugin.cancel(summaryId);
+      debugPrint('[BgNotificationReply] Cancelled notification IDs successfully');
+    } catch (e) {
+      debugPrint('[BgNotificationReply] Error cancelling notifications: $e');
+    }
+  }
+}
 
 class LocalNotificationService {
-  LocalNotificationService({required this.appName});
+  LocalNotificationService({
+    required this.appName,
+    UserPreferencesStore? preferencesStore,
+  }) : _preferencesStore = preferencesStore ?? UserPreferencesStore();
 
   static const _notificationToneIdKey = 'prefs_notification_tone_id';
   static const _legacyNotificationToneIdKey = 'notificationToneId';
@@ -25,6 +163,7 @@ class LocalNotificationService {
   static const _androidSilentChannelId = 'chat_messages_silent_v1';
 
   final String appName;
+  final UserPreferencesStore _preferencesStore;
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
   final StreamController<Map<String, dynamic>> _tapController =
@@ -32,8 +171,65 @@ class LocalNotificationService {
   final AudioPlayer _audioPlayer = AudioPlayer();
   bool _initialized = false;
   int _nextId = 1;
+  Map<String, dynamic>? _pendingLaunchPayload;
+
+  // Active notifications tracking for WhatsApp-style chat grouping
+  final Map<String, List<String>> _conversationSnippets = {};
+  final Map<String, Set<int>> _conversationNotificationIds = {};
+  static const int _summaryIdOffset = 1000000;
 
   Stream<Map<String, dynamic>> get tapEvents => _tapController.stream;
+
+  Map<String, dynamic>? takePendingLaunchPayload() {
+    final payload = _pendingLaunchPayload;
+    _pendingLaunchPayload = null;
+    return payload;
+  }
+
+  Future<void> cancel(int id) async {
+    try {
+      await _plugin.cancel(id);
+    } catch (_) {}
+  }
+
+  /// Cancels all notifications (child messages and summary) for a specific conversation.
+  /// Called when a conversation is opened, cleared, or marked as read.
+  Future<void> cancelConversationNotifications(String conversationId) async {
+    final convId = conversationId.trim();
+    if (convId.isEmpty) return;
+
+    final childIds = _conversationNotificationIds.remove(convId);
+    _conversationSnippets.remove(convId);
+
+    final summaryId = (convId.hashCode.abs() % 800000) + _summaryIdOffset;
+    try {
+      await _plugin.cancel(summaryId);
+    } catch (_) {}
+
+    try {
+      final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      await androidPlugin?.cancel(summaryId, tag: 'chat_$convId');
+    } catch (_) {}
+
+    if (childIds != null) {
+      for (final id in childIds) {
+        try {
+          await _plugin.cancel(id);
+        } catch (_) {}
+      }
+    }
+  }
+
+  /// Cancels all active notifications across all chats and categories.
+  /// Called on logout or when all messages are read.
+  Future<void> cancelAllNotifications() async {
+    _conversationNotificationIds.clear();
+    _conversationSnippets.clear();
+    try {
+      await _plugin.cancelAll();
+    } catch (_) {}
+  }
 
   Future<void> initialize() async {
     if (_initialized) {
@@ -69,44 +265,281 @@ class LocalNotificationService {
       );
     }
     await _createAndroidNotificationChannels(androidPlugin);
+    try {
+      final launchDetails = await _plugin.getNotificationAppLaunchDetails();
+      if (launchDetails != null &&
+          launchDetails.didNotificationLaunchApp &&
+          launchDetails.notificationResponse != null) {
+        _handleNotificationResponse(launchDetails.notificationResponse!);
+      }
+    } catch (_) {}
     _initialized = true;
+  }
+
+  /// Checks if system notification permission is granted by OS
+  Future<bool> areNotificationsEnabled() async {
+    if (Platform.isAndroid) {
+      final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      return (await androidPlugin?.areNotificationsEnabled()) ?? true;
+    }
+    return true;
   }
 
   Future<void> showIncomingMessage({
     required String title,
     required String body,
     Map<String, dynamic>? payload,
+    bool isTestNotification = false,
   }) async {
     await initialize();
-    await _playNotificationTone();
+    final preferences = await _preferencesStore.load();
 
-    final details = NotificationDetails(
-      android: const AndroidNotificationDetails(
-        _androidLocalChannelId,
-        'رسائل الشات',
-        channelDescription: 'إشعارات الرسائل الداخلية',
-        importance: Importance.high,
-        priority: Priority.high,
-        playSound: false,
-      ),
-      iOS: const DarwinNotificationDetails(presentSound: false),
-      windows: WindowsNotificationDetails(
-        audio: WindowsNotificationAudio.silent(),
-      ),
+    // Master notification toggle
+    if (!preferences.notificationsEnabled && !isTestNotification) {
+      return;
+    }
+
+    final isReminder = payload?['type'] == 'chat_reminder' || payload?['type'] == 'reminder';
+    final isReaction = payload?['type'] == 'chat_reaction';
+    final isTicket = payload?['type'] == 'ticket';
+    final isGroup = payload?['isGroup'] == true ||
+        payload?['conversationType'] == 'group';
+
+    final isChat = (payload == null ||
+        payload.isEmpty ||
+        payload['type'] == 'chat' ||
+        payload['type'] == 'chat_reaction' ||
+        payload['conversationId'] != null) && !isReminder;
+
+    if (isReaction && !preferences.reactionNotifications && !isTestNotification) {
+      return;
+    }
+
+    if (isChat && !isReaction) {
+      if (isGroup && !preferences.groupNotificationsEnabled && !isTestNotification) {
+        return;
+      }
+      if (!isGroup && !preferences.messageNotificationsEnabled && !isTestNotification) {
+        return;
+      }
+    }
+
+    // Respect preview settings
+    final showPreview = isGroup ? preferences.groupPreview : preferences.messagePreview;
+    String effectiveTitle = title.trim();
+    String effectiveBody = body.trim();
+    if (!showPreview && !isTicket && !isReminder && !isTestNotification) {
+      effectiveTitle = isGroup ? 'مجموعة iSmart' : 'رسالة جديدة';
+      effectiveBody = isGroup ? 'لديك رسالة جديدة في المجموعة' : 'لديك رسالة جديدة';
+    }
+    if (effectiveTitle.isEmpty) effectiveTitle = appName;
+    if (effectiveBody.isEmpty) effectiveBody = 'لديك رسالة جديدة';
+
+    // Selected tone & vibration
+    final toneId = isGroup ? preferences.groupToneId : preferences.notificationToneId;
+    final shouldVibrate = isGroup ? preferences.groupVibrate : preferences.messageVibrate;
+
+    // Play sound if not silent and in sound-allowing mode
+    if (preferences.notificationDisplayMode != NotificationDisplayMode.hideDetails || isTestNotification) {
+      await _playNotificationTone(toneId);
+    }
+
+    final conversationId = payload?['conversationId']?.toString().trim();
+    final shouldGroup = preferences.groupNotificationsByChat &&
+        conversationId != null &&
+        conversationId.isNotEmpty;
+
+    final notificationId = _nextId++;
+    final encodedPayload = payload == null || payload.isEmpty
+        ? null
+        : jsonEncode({
+            ...payload,
+            'notificationId': notificationId,
+          });
+
+    if (shouldGroup) {
+      final groupKey = 'com.ismart.messenger.chat.$conversationId';
+
+      // Record child notification ID
+      _conversationNotificationIds
+          .putIfAbsent(conversationId, () => <int>{})
+          .add(notificationId);
+
+      // Record snippet for conversation summary (keep up to 7)
+      final snippets = _conversationSnippets.putIfAbsent(
+        conversationId,
+        () => <String>[],
+      );
+      snippets.add(effectiveBody);
+      if (snippets.length > 7) {
+        snippets.removeAt(0);
+      }
+
+      // 1. Child notification (individual message with reply button)
+      final childDetails = NotificationDetails(
+        android: AndroidNotificationDetails(
+          _androidLocalChannelId,
+          'رسائل الشات داخل التطبيق',
+          channelDescription: 'إشعارات الرسائل الداخلية',
+          importance: Importance.high,
+          priority: Priority.high,
+          playSound: false,
+          enableVibration: shouldVibrate,
+          groupKey: groupKey,
+          setAsGroupSummary: false,
+          groupAlertBehavior: GroupAlertBehavior.children,
+          actions: isChat
+              ? const <AndroidNotificationAction>[
+                  AndroidNotificationAction(
+                    'reply_action',
+                    'رد',
+                    inputs: <AndroidNotificationActionInput>[
+                      AndroidNotificationActionInput(
+                        label: 'اكتب ردك هنا...',
+                      ),
+                    ],
+                    allowGeneratedReplies: true,
+                    cancelNotification: false,
+                  ),
+                ]
+              : null,
+        ),
+        iOS: DarwinNotificationDetails(
+          presentSound: false,
+          threadIdentifier: 'chat_$conversationId',
+        ),
+        windows: WindowsNotificationDetails(
+          audio: WindowsNotificationAudio.silent(),
+        ),
+      );
+
+      await _plugin.show(
+        notificationId,
+        effectiveTitle,
+        effectiveBody,
+        childDetails,
+        payload: encodedPayload,
+      );
+
+      // 2. Summary notification for this conversation (WhatsApp style inbox bundle)
+      final summaryId = (conversationId.hashCode.abs() % 800000) + _summaryIdOffset;
+      final summaryText = snippets.length > 1
+          ? '${snippets.length} رسائل جديدة'
+          : 'رسالة جديدة';
+
+      final summaryDetails = NotificationDetails(
+        android: AndroidNotificationDetails(
+          _androidLocalChannelId,
+          'رسائل الشات داخل التطبيق',
+          channelDescription: 'إشعارات الرسائل الداخلية',
+          importance: Importance.high,
+          priority: Priority.high,
+          playSound: false,
+          enableVibration: false,
+          groupKey: groupKey,
+          setAsGroupSummary: true,
+          groupAlertBehavior: GroupAlertBehavior.children,
+          styleInformation: InboxStyleInformation(
+            List<String>.from(snippets),
+            contentTitle: effectiveTitle,
+            summaryText: summaryText,
+          ),
+        ),
+        iOS: DarwinNotificationDetails(
+          presentSound: false,
+          threadIdentifier: 'chat_$conversationId',
+        ),
+        windows: WindowsNotificationDetails(
+          audio: WindowsNotificationAudio.silent(),
+        ),
+      );
+
+      await _plugin.show(
+        summaryId,
+        effectiveTitle,
+        effectiveBody,
+        summaryDetails,
+        payload: encodedPayload,
+      );
+    } else {
+      // Standalone notification (no grouping)
+      final details = NotificationDetails(
+        android: AndroidNotificationDetails(
+          _androidLocalChannelId,
+          'رسائل الشات داخل التطبيق',
+          channelDescription: 'إشعارات الرسائل الداخلية',
+          importance: Importance.high,
+          priority: Priority.high,
+          playSound: false,
+          enableVibration: shouldVibrate,
+          actions: isChat
+              ? const <AndroidNotificationAction>[
+                  AndroidNotificationAction(
+                    'reply_action',
+                    'رد',
+                    inputs: <AndroidNotificationActionInput>[
+                      AndroidNotificationActionInput(
+                        label: 'اكتب ردك هنا...',
+                      ),
+                    ],
+                    allowGeneratedReplies: true,
+                    cancelNotification: false,
+                  ),
+                ]
+              : null,
+        ),
+        iOS: const DarwinNotificationDetails(presentSound: false),
+        windows: WindowsNotificationDetails(
+          audio: WindowsNotificationAudio.silent(),
+        ),
+      );
+
+      await _plugin.show(
+        notificationId,
+        effectiveTitle,
+        effectiveBody,
+        details,
+        payload: encodedPayload,
+      );
+    }
+  }
+
+  /// Sends a simulated grouped notification so the user can verify in real-time
+  Future<void> showTestNotification() async {
+    const testConvId = 'test_conversation_group';
+    await cancelConversationNotifications(testConvId);
+
+    await showIncomingMessage(
+      title: 'تجربة الإشعارات (iSmart)',
+      body: 'مرحباً بك في iSmart Messenger! 👋',
+      payload: const {
+        'type': 'chat',
+        'conversationId': testConvId,
+        'messageId': 'test_msg_1',
+      },
+      isTestNotification: true,
     );
 
-    await _plugin.show(
-      _nextId++,
-      title.isEmpty ? appName : title,
-      body.isEmpty ? 'لديك رسالة جديدة' : body,
-      details,
-      payload: payload == null || payload.isEmpty ? null : jsonEncode(payload),
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+
+    await showIncomingMessage(
+      title: 'تجربة الإشعارات (iSmart)',
+      body: 'هذا مثال على إشعار مجمع كالمحادثات في واتساب 🚀',
+      payload: const {
+        'type': 'chat',
+        'conversationId': testConvId,
+        'messageId': 'test_msg_2',
+      },
+      isTestNotification: true,
     );
   }
 
-  Future<void> _playNotificationTone() async {
+  Future<void> _playNotificationTone([String? toneId]) async {
     try {
-      final tone = await _loadSelectedTone();
+      final tone = toneId != null
+          ? NotificationTone.fromId(toneId)
+          : await _loadSelectedTone();
       if (tone.isSilent || tone.assetPath == null) {
         return;
       }
@@ -215,8 +648,18 @@ class LocalNotificationService {
   }
 
   void _handleNotificationResponse(NotificationResponse response) {
-    final payload = _decodePayload(response.payload);
+    final payload = Map<String, dynamic>.from(_decodePayload(response.payload));
+    if (response.actionId != null) {
+      payload['actionId'] = response.actionId;
+    }
+    if (response.input != null && response.input!.trim().isNotEmpty) {
+      payload['replyText'] = response.input!.trim();
+    }
+    if (response.id != null) {
+      payload['notificationId'] = response.id;
+    }
     if (payload.isNotEmpty) {
+      _pendingLaunchPayload = payload;
       _tapController.add(payload);
     }
   }
@@ -241,5 +684,7 @@ class LocalNotificationService {
   Future<void> dispose() async {
     await _tapController.close();
     await _audioPlayer.dispose();
+    _conversationSnippets.clear();
+    _conversationNotificationIds.clear();
   }
 }

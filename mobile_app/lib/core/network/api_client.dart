@@ -32,6 +32,7 @@ class ApiClient {
           final requestPath = options.path.toLowerCase();
           final isPublic =
               requestPath.contains('/api/auth/login') ||
+              requestPath.contains('/api/auth/logout') ||
               requestPath.contains('/api/auth/refresh') ||
               requestPath.contains('/api/app-settings') ||
               requestPath.contains('/health');
@@ -99,6 +100,34 @@ class ApiClient {
             'authRetryCount=$retryCount',
           );
 
+          final isTransferEndpoint =
+              options.data is FormData ||
+              options.extra['isTransfer'] == true ||
+              requestPath.contains('/transfers') ||
+              requestPath.contains('/upload') ||
+              requestPath.contains('/download') ||
+              requestPath.contains('/releases') ||
+              requestPath.contains('/updates') ||
+              requestPath.contains('/chat/messages') ||
+              requestPath.contains('/documents');
+          final isFastEndpoint = requestPath.contains('/auth/login') ||
+              requestPath.contains('/auth/register') ||
+              requestPath.contains('/health');
+          if (isFastEndpoint) {
+            options.connectTimeout = const Duration(seconds: 10);
+            options.receiveTimeout = const Duration(seconds: 15);
+            options.sendTimeout = const Duration(seconds: 15);
+          } else if (isTransferEndpoint) {
+            // Generous timeouts for large files, uploads, and downloads over slow branch VPNs and mobile networks
+            options.connectTimeout = const Duration(seconds: 45);
+            options.receiveTimeout = const Duration(minutes: 30);
+            options.sendTimeout = const Duration(minutes: 30);
+          } else {
+            // Fast failure for normal queries so slow networks don't freeze UI
+            options.receiveTimeout = const Duration(seconds: 20);
+            options.sendTimeout = const Duration(seconds: 20);
+          }
+
           handler.next(options);
         },
         onResponse: (response, handler) {
@@ -114,12 +143,20 @@ class ApiClient {
           final isRefreshRequest = requestOptions.path.contains(
             '/api/auth/refresh',
           );
+          final isLogoutRequest =
+              requestOptions.path.contains('/api/auth/logout') ||
+              requestOptions.extra['requestSource'] == 'auth.logout';
+          final isLoginRequest = requestOptions.path.contains(
+            '/api/auth/login',
+          );
 
           // Handle 401 errors by attempting token refresh once per request.
           if (error.response?.statusCode == 401 &&
               _authRepository != null &&
               !alreadyRetried &&
-              !isRefreshRequest) {
+              !isRefreshRequest &&
+              !isLogoutRequest &&
+              !isLoginRequest) {
             try {
               final refreshed = await _refreshAccessToken();
               final token = await _authRepository.getToken();
@@ -237,18 +274,32 @@ class ApiClient {
       final requestPath = error.requestOptions.path.toLowerCase();
       final isLoginRequest = requestPath.contains('/api/auth/login');
 
+      if (payload is Map<String, dynamic>) {
+        if (payload['details'] is List) {
+          final detailsList = (payload['details'] as List)
+              .whereType<Map<String, dynamic>>()
+              .map((d) => (d['message'] ?? d['msg'])?.toString().trim())
+              .whereType<String>()
+              .where((m) => m.isNotEmpty)
+              .toList();
+          if (detailsList.isNotEmpty) {
+            return ApiException(detailsList.join('\n'), statusCode: statusCode);
+          }
+        }
+      }
       if (payload is Map<String, dynamic> && payload['message'] is String) {
         final rawMessage = (payload['message'] as String).trim();
-        final lowerMessage = rawMessage.toLowerCase();
-        if (statusCode == 401 &&
-            (isLoginRequest ||
-                lowerMessage.contains('invalid username or password'))) {
-          return const ApiException(
-            'اسم المستخدم أو كلمة المرور غير صحيحة.',
-            statusCode: 401,
-          );
-        }
         if (statusCode == 401) {
+          if (rawMessage.isNotEmpty) {
+            return ApiException(
+              _translateServerMessage(
+                rawMessage,
+                statusCode: statusCode,
+                requestPath: requestPath,
+              ),
+              statusCode: 401,
+            );
+          }
           return const ApiException(
             'انتهت صلاحية الجلسة أو فشل التحقق. سجل الدخول مرة أخرى.',
             statusCode: 401,
@@ -302,15 +353,27 @@ class ApiClient {
         );
       }
 
-      if (error.type == DioExceptionType.connectionTimeout ||
-          error.type == DioExceptionType.receiveTimeout ||
-          error.type == DioExceptionType.sendTimeout) {
-        return const ApiException(
-          'الخادم غير متاح حاليا. جاري العمل على الإصلاح، وسيتم تحديث البيانات تلقائيا عند عودة الاتصال.',
-        );
+      if (error.type == DioExceptionType.cancel) {
+        return const ApiException('تم إلغاء العملية.');
       }
 
-      if (error.type == DioExceptionType.connectionError) {
+      if (error.type == DioExceptionType.connectionTimeout ||
+          error.type == DioExceptionType.receiveTimeout ||
+          error.type == DioExceptionType.sendTimeout ||
+          error.type == DioExceptionType.connectionError) {
+        final reqPath = error.requestOptions.path.toLowerCase();
+        final isTransfer = error.requestOptions.data is FormData ||
+            error.requestOptions.extra['isTransfer'] == true ||
+            reqPath.contains('/download') ||
+            reqPath.contains('/upload') ||
+            reqPath.contains('/transfers') ||
+            reqPath.contains('/chat/messages') ||
+            reqPath.contains('/documents');
+        if (isTransfer) {
+          return const ApiException(
+            'تعذر استكمال نقل الملف بسبب ضعف أو انقطاع الاتصال بالشبكة. يرجى التحقق من الاتصال وإعادة المحاولة.',
+          );
+        }
         return const ApiException(
           'الخادم غير متاح حاليا. جاري العمل على الإصلاح، وسيتم تحديث البيانات تلقائيا عند عودة الاتصال.',
         );

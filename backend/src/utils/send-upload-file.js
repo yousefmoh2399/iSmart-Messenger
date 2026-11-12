@@ -33,13 +33,17 @@ async function sendUploadFile(
   res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
   res.setHeader("Timing-Allow-Origin", "*");
 
-  // Set Content-Length so clients can show accurate download progress
+  // Allow long-running downloads over slow branch VPNs
   try {
-    const { size } = await fs.stat(resolvedPath);
-    if (size > 0) {
-      res.setHeader("Content-Length", String(size));
+    const req = res.req;
+    if (req && req.socket) {
+      req.socket.setTimeout(30 * 60 * 1000);
     }
+    res.setTimeout(30 * 60 * 1000);
   } catch (_) {}
+
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("x-no-compression", "1");
 
   const resolvedContentType = contentType || inferContentType(resolvedPath);
   if (resolvedContentType) {
@@ -58,12 +62,19 @@ async function sendUploadFile(
       return;
     }
 
-    console.warn(`[${logLabel}] sendFile failed`, {
-      storedPath,
-      resolvedPath,
-      code: error.code,
-      message: error.message,
-    });
+    const isClientAbort =
+      ["ECONNABORTED", "EPIPE", "ECONNRESET", "ECANCELED", "ETIMEDOUT"].includes(error.code) ||
+      error.message === "Request aborted" ||
+      error.status === 416;
+
+    if (!isClientAbort) {
+      console.warn(`[${logLabel}] sendFile failed`, {
+        storedPath,
+        resolvedPath,
+        code: error.code,
+        message: error.message,
+      });
+    }
 
     if (res.headersSent) {
       return;
@@ -71,6 +82,11 @@ async function sendUploadFile(
 
     if (error.code === "ENOENT") {
       res.status(404).json({ message: notFoundMessage });
+      return;
+    }
+
+    if (error.status === 416 || error.statusCode === 416) {
+      res.status(416).json({ message: "Range Not Satisfiable" });
       return;
     }
 

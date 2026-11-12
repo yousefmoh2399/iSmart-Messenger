@@ -1,7 +1,6 @@
 process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true';
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-
 const {
   app,
   BrowserWindow,
@@ -15,12 +14,41 @@ const {
   nativeTheme,
   safeStorage,
 } = require("electron");
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
 const fs = require("fs");
 const http = require("http");
 const https = require("https");
 const os = require("os");
 const path = require("path");
+
+// Windows 7 / Electron 22 compatibility: Apply GPU/sandbox flags early (before app 'ready').
+// These prevent crashes on Windows 7 which lacks modern GPU compositing APIs.
+if (process.platform === 'win32') {
+  const release = os.release(); // e.g. "6.1.7601" for Win7, "6.2.xxxx" for Win8+
+  const major = parseInt(release.split('.')[0], 10);
+  const minor = parseInt(release.split('.')[1], 10);
+  const isWin7OrOlder = major < 6 || (major === 6 && minor < 2);
+  const forceSoftwareGpu = process.argv.includes('--disable-gpu') || process.env.ISMART_DISABLE_GPU === '1';
+  if (forceSoftwareGpu) {
+    app.disableHardwareAcceleration();
+  } else if (isWin7OrOlder) {
+    // Disable GPU sandbox — Windows 7 sandbox layer is incompatible with Chromium 108+
+    app.commandLine.appendSwitch('disable-gpu-sandbox');
+
+
+    // Disable Direct2D font rendering (uses GDI fallback on Win7)
+    app.commandLine.appendSwitch('disable-directwrite-for-ui');
+    // Force hardware rasterization with D3D9 ANGLE backend (fast 60fps on Win7 legacy drivers)
+    app.commandLine.appendSwitch('enable-gpu-rasterization');
+    app.commandLine.appendSwitch('enable-zero-copy');
+    app.commandLine.appendSwitch('ignore-gpu-blocklist');
+    // Disable DX12 (not available on Win7)
+    app.commandLine.appendSwitch('use-angle', 'd3d9');
+  } else {
+    app.commandLine.appendSwitch('enable-gpu-rasterization');
+    app.commandLine.appendSwitch('enable-zero-copy');
+  }
+}
 
 const { createPrintToolResolver } = require("./printing/print_tool_resolver");
 const { createPdfPrintService } = require("./printing/pdf_print_service");
@@ -46,9 +74,9 @@ let lanReceiveReminderTimer = null;
 let currentWindowTheme = nativeTheme.shouldUseDarkColors ? "dark" : "light";
 const pendingLanTransfers = new Map();
 const pendingLanReceiveRequests = new Map();
-const MAX_ELECTRON_FETCH_BYTES = 80 * 1024 * 1024;
+const MAX_ELECTRON_FETCH_BYTES = 512 * 1024 * 1024;
 const LAN_DISCOVERY_TIMEOUT_MS = 750;
-const LAN_DISCOVERY_BATCH_SIZE = 96;
+const LAN_DISCOVERY_BATCH_SIZE = 20;
 const DEFAULT_TRANSFER_POLICY = {
   maxFileSizeBytes: 500 * 1024 * 1024,
   allowedExtensions: [],
@@ -85,7 +113,7 @@ function applyWindowTheme(mode = currentWindowTheme) {
   // visually each time the mouse passes over minimize/maximize/close.
   if (themeChanged && typeof mainWindow.setTitleBarOverlay === "function") {
     mainWindow.setTitleBarOverlay({
-      color: "rgba(0,0,0,0)",
+      color: palette.color,
       symbolColor: palette.symbolColor,
       height: 34,
     });
@@ -104,6 +132,11 @@ function debugLogPath() {
   return path.join(app.getPath("userData"), "auth-debug.log");
 }
 
+const _DEBUG_LOG_MAX_BYTES = 2 * 1024 * 1024;
+let _debugLogDirReady = false;
+let _debugLogWriteCount = 0;
+let _debugLogChain = Promise.resolve();
+
 function appendDebugLog(scope, message, details) {
   try {
     const line = JSON.stringify({
@@ -112,8 +145,25 @@ function appendDebugLog(scope, message, details) {
       message: String(message || ""),
       details: details == null ? null : details,
     });
-    fs.mkdirSync(path.dirname(debugLogPath()), { recursive: true });
-    fs.appendFileSync(debugLogPath(), `${line}\n`, "utf8");
+    const logFile = debugLogPath();
+    _debugLogChain = _debugLogChain
+      .then(async () => {
+        if (!_debugLogDirReady) {
+          await fs.promises.mkdir(path.dirname(logFile), { recursive: true });
+          _debugLogDirReady = true;
+        }
+        _debugLogWriteCount += 1;
+        if (_debugLogWriteCount % 100 === 0) {
+          try {
+            const st = await fs.promises.stat(logFile);
+            if (st.size > _DEBUG_LOG_MAX_BYTES) {
+              await fs.promises.truncate(logFile, 0);
+            }
+          } catch (_) {}
+        }
+        await fs.promises.appendFile(logFile, `${line}\n`, "utf8");
+      })
+      .catch(() => {});
   } catch (_) {}
 }
 
@@ -137,9 +187,14 @@ function localStorageRootPath(preferredPath) {
   return path.join(localAppData, APP_NAME, "Storage");
 }
 
+const _ensuredStorageDirs = new Set();
+
 function localStorageChildPath(name, preferredPath) {
   const directory = path.join(localStorageRootPath(preferredPath), name);
-  fs.mkdirSync(directory, { recursive: true });
+  if (!_ensuredStorageDirs.has(directory)) {
+    fs.mkdirSync(directory, { recursive: true });
+    _ensuredStorageDirs.add(directory);
+  }
   return directory;
 }
 
@@ -458,13 +513,42 @@ app.on("second-instance", () => {
 app.commandLine.appendSwitch("disable-dev-shm-usage");
 app.commandLine.appendSwitch("no-sandbox");
 app.commandLine.appendSwitch("ignore-certificate-errors");
+app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>,127.0.0.1,localhost");
 
-// Windows 7 (NT 6.1) struggles with modern Chromium hardware acceleration,
-// and forcing WebGL causes severe lag, stuttering, and high response times.
-// Disabling hardware acceleration on Windows 7 falls back to a much faster software renderer.
+
+app.commandLine.appendSwitch("renderer-process-limit", "3");
+
+// V8 32-bit Memory Optimization: constrain heap to 512MB to trigger fast, non-blocking GC pauses
+// preventing memory fragmentation and 1-2 second freezes on low-RAM branch PCs.
+app.commandLine.appendSwitch("js-flags", "--max-old-space-size=512");
+
+// Limit disk cache to prevent thrashing slow mechanical 5400rpm hard drives
+app.commandLine.appendSwitch("disk-cache-size", "67108864");
+app.commandLine.appendSwitch("font-render-hinting", "medium");
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+
+// Graphics Performance Tuning:
+// On Windows 7 (NT 6.1), disabling hardware acceleration forces CPU software emulation (SwiftShader),
+// which pegs dual-core CPUs at 100% and freezes the app when scrolling or typing.
+// Instead, we force the mature DirectX 9 ANGLE backend with GPU rasterization,
+// which runs at 60fps on virtually all legacy Intel/AMD/Nvidia drivers on Windows 7.
+/* Graphics tuning configured in early init
 if (os.release().startsWith("6.1")) {
-  app.disableHardwareAcceleration();
+  const forceSoftware = process.argv.includes("--disable-gpu") || process.env.ISMART_DISABLE_GPU === "1";
+  if (forceSoftware) {
+    app.disableHardwareAcceleration();
+  } else {
+    app.commandLine.appendSwitch("use-angle", "d3d9");
+    app.commandLine.appendSwitch("ignore-gpu-blocklist");
+    app.commandLine.appendSwitch("enable-gpu-rasterization");
+    app.commandLine.appendSwitch("enable-zero-copy");
+  }
+} else {
+  app.commandLine.appendSwitch("enable-gpu-rasterization");
+  app.commandLine.appendSwitch("enable-zero-copy");
 }
+
+*/
 
 app.on("certificate-error", (event, webContents, url, error, certificate, callback) => {
   event.preventDefault();
@@ -526,6 +610,50 @@ function resolveWebFile(root, requestUrl) {
   return requested;
 }
 
+const _staticWebCache = new Map();
+let _staticWebCacheBytes = 0;
+const MAX_STATIC_WEB_CACHE_BYTES = 48 * 1024 * 1024;
+const MAX_STATIC_WEB_CACHE_ENTRY_BYTES = 16 * 1024 * 1024;
+
+function _shouldCacheStaticWebAsset(filePath, ext) {
+  const base = path.basename(filePath).toLowerCase();
+  if (
+    ext === ".html" ||
+    base === "flutter_service_worker.js" ||
+    base === "version.json"
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function _cacheStaticWebAsset(filePath, ext, data) {
+  if (
+    !_shouldCacheStaticWebAsset(filePath, ext) ||
+    !data ||
+    data.length > MAX_STATIC_WEB_CACHE_ENTRY_BYTES ||
+    _staticWebCache.has(filePath)
+  ) {
+    return;
+  }
+  while (
+    _staticWebCacheBytes + data.length > MAX_STATIC_WEB_CACHE_BYTES &&
+    _staticWebCache.size > 0
+  ) {
+    const oldestKey = _staticWebCache.keys().next().value;
+    const oldest = _staticWebCache.get(oldestKey);
+    _staticWebCache.delete(oldestKey);
+    if (oldest) {
+      _staticWebCacheBytes -= oldest.data.length;
+    }
+  }
+  _staticWebCache.set(filePath, {
+    contentType: mimeTypes[ext] || "application/octet-stream",
+    data,
+  });
+  _staticWebCacheBytes += data.length;
+}
+
 function startWebAppServer() {
   if (webAppServer) {
     const address = webAppServer.address();
@@ -533,7 +661,7 @@ function startWebAppServer() {
   }
 
   const root = webRoot();
-  webAppServer = http.createServer((request, response) => {
+  webAppServer = http.createServer(async (request, response) => {
     if (request.method !== "GET" && request.method !== "HEAD") {
       response.writeHead(405);
       response.end("Method not allowed");
@@ -546,12 +674,31 @@ function startWebAppServer() {
       response.end("Forbidden");
       return;
     }
+
     try {
-      if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+      const cached = _staticWebCache.get(filePath);
+      if (cached) {
+        response.writeHead(200, {
+          "Content-Type": cached.contentType,
+          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+          Pragma: "no-cache",
+          Expires: "0",
+        });
+        if (request.method === "HEAD") {
+          response.end();
+          return;
+        }
+        response.end(cached.data);
+        return;
+      }
+
+      const stat = await fs.promises.stat(filePath).catch(() => null);
+      if (!stat || stat.isDirectory()) {
         filePath = path.join(root, "index.html");
       }
       const ext = path.extname(filePath).toLowerCase();
-      const data = fs.readFileSync(filePath);
+      const data = await fs.promises.readFile(filePath);
+      _cacheStaticWebAsset(filePath, ext, data);
       response.writeHead(200, {
         "Content-Type": mimeTypes[ext] || "application/octet-stream",
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
@@ -570,24 +717,24 @@ function startWebAppServer() {
   });
 
   return new Promise((resolve, reject) => {
-    webAppServer.once("error", reject);
+    webAppServer.once("error", (err) => {
+      if (err && err.code === "EADDRINUSE") {
+        console.warn(`[WebServer] Port ${WEB_APP_PORT} in use, retrying on dynamic port 0...`);
+        webAppServer.once("error", reject);
+        webAppServer.listen(0, "127.0.0.1", () => {
+          const address = webAppServer.address();
+          console.log(`[WebServer] Web app listening on dynamic port http://127.0.0.1:${address.port}/`);
+          resolve(`http://127.0.0.1:${address.port}/`);
+        });
+        return;
+      }
+      reject(err);
+    });
     webAppServer.listen(WEB_APP_PORT, "127.0.0.1", () => {
       const address = webAppServer.address();
       resolve(`http://127.0.0.1:${address.port}/`);
     });
   });
-}
-
-function localIpv4s() {
-  const result = [];
-  for (const entries of Object.values(os.networkInterfaces())) {
-    for (const entry of entries || []) {
-      if (entry.family === "IPv4" && !entry.internal) {
-        result.push(entry.address);
-      }
-    }
-  }
-  return result;
 }
 
 function sleep(ms) {
@@ -604,6 +751,118 @@ function normalizeLanIp(value) {
     return "";
   }
   return parts.join(".");
+}
+
+const VIRTUAL_ADAPTER_REGEX =
+  /(vmware|virtualbox|vbox|vethernet|hyper-v|wsl|loopback|npcap|pcap|tap|tun|tailscale|zerotier|hamachi|wireguard|nordlynx|anyconnect|fortinet|pulse|cisco|vpn|bluetooth)/i;
+const PHYSICAL_ADAPTER_REGEX =
+  /(ethernet|wi-fi|wifi|wlan|eth|local area connection|شبكة)/i;
+const VIRTUAL_MAC_PREFIXES = [
+  "00:50:56",
+  "00:0c:29",
+  "00:05:69",
+  "08:00:27",
+  "00:15:5d",
+];
+
+function getRankedIpv4Addresses() {
+  const ifaces = os.networkInterfaces();
+  const candidates = [];
+
+  for (const [name, entries] of Object.entries(ifaces)) {
+    for (const entry of entries || []) {
+      const isIpv4 = entry.family === "IPv4" || entry.family === 4;
+      if (!isIpv4 || entry.internal) {
+        continue;
+      }
+      const rawIp = String(entry.address || "").trim();
+      const ip = normalizeLanIp(rawIp);
+      if (
+        !ip ||
+        ip.startsWith("127.") ||
+        ip.startsWith("169.254.") ||
+        ip === "0.0.0.0"
+      ) {
+        continue;
+      }
+
+      let score = 100;
+      const lowerName = name.toLowerCase();
+      const mac = (entry.mac || "").toLowerCase();
+      const isVirtual =
+        VIRTUAL_ADAPTER_REGEX.test(lowerName) ||
+        VIRTUAL_MAC_PREFIXES.some((prefix) => mac.startsWith(prefix));
+
+      if (isVirtual) {
+        score -= 90;
+      }
+      if (PHYSICAL_ADAPTER_REGEX.test(lowerName)) {
+        score += 60;
+      }
+
+      // Priority for standard private branch / office subnets
+      if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip)) {
+        score += 30;
+      } else if (ip.startsWith("192.168.")) {
+        score += 20;
+      } else if (ip.startsWith("10.")) {
+        score += 15;
+      }
+
+      candidates.push({ name, ip, mac, score, isVirtual });
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates;
+}
+
+function localPhysicalLanIpv4s() {
+  const ranked = getRankedIpv4Addresses();
+  const seen = new Set();
+  const result = [];
+  for (const c of ranked) {
+    if (c.isVirtual) {
+      continue;
+    }
+    if (!seen.has(c.ip)) {
+      seen.add(c.ip);
+      result.push(c.ip);
+    }
+  }
+  return result;
+}
+
+function localIpv4s() {
+  const ranked = getRankedIpv4Addresses();
+  const seen = new Set();
+  const result = [];
+  for (const c of ranked) {
+    if (!seen.has(c.ip)) {
+      seen.add(c.ip);
+      result.push(c.ip);
+    }
+  }
+  if (result.length === 0) {
+    for (const entries of Object.values(os.networkInterfaces())) {
+      for (const entry of entries || []) {
+        const isIpv4 = entry.family === "IPv4" || entry.family === 4;
+        if (isIpv4 && !entry.internal) {
+          const ip = normalizeLanIp(entry.address);
+          if (ip && !ip.startsWith("127.") && !seen.has(ip)) {
+            seen.add(ip);
+            result.push(ip);
+          }
+        }
+      }
+    }
+  }
+  return result;
+}
+
+function getBestLocalIpv4() {
+  const ips = localIpv4s();
+  return ips.length > 0 ? ips[0] : null;
 }
 
 function lanSubnetKey(value) {
@@ -661,7 +920,11 @@ async function probeLanPeerWithRetry(targetIp, { attempts = 3, timeoutMs = 2500 
 }
 
 async function discoverLanPeersOnLocalNetworks() {
-  const ownIps = uniqueLanIps(localIpv4s());
+  // Never scan VPN TAP/TUN or VM virtual adapter subnets with /24 probes.
+  const ownIps = uniqueLanIps(localPhysicalLanIpv4s());
+  if (ownIps.length === 0) {
+    return [];
+  }
   const ownIpSet = new Set(ownIps);
   const subnets = Array.from(new Set(ownIps.map(lanSubnetKey).filter(Boolean))).sort();
   const candidates = [];
@@ -725,6 +988,38 @@ function ensureStartup(enabled = true) {
       ]
     : ["delete", STARTUP_REG_KEY, "/v", STARTUP_VALUE_NAME, "/f"];
   execFile("reg.exe", args, { windowsHide: true }, () => {});
+}
+
+function cleanLegacyInstallation() {
+  if (process.platform !== "win32") {
+    return;
+  }
+  try {
+    // Only clean legacy Public desktop shortcut if it exists so employees don't see duplicate/old icons
+    const publicDesktop = process.env.PUBLIC
+      ? path.join(process.env.PUBLIC, "Desktop")
+      : "C:\\Users\\Public\\Desktop";
+    const legacyPublicLnk = path.join(publicDesktop, "iSmart Messenger.lnk");
+    if (fs.existsSync(legacyPublicLnk)) {
+      try { fs.unlinkSync(legacyPublicLnk); } catch (_) {}
+    }
+    const legacyPublicLnk2 = path.join(publicDesktop, "ismart-messenger.lnk");
+    if (fs.existsSync(legacyPublicLnk2)) {
+      try { fs.unlinkSync(legacyPublicLnk2); } catch (_) {}
+    }
+
+    // Delete legacy uninstaller file from Program Files (x86) if present WITHOUT EVER executing it
+    const pf32 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+    const legacyUninstaller = path.join(pf32, "iSmart Messenger", "Uninstall iSmart Messenger.exe");
+    if (fs.existsSync(legacyUninstaller)) {
+      try { fs.unlinkSync(legacyUninstaller); } catch (_) {}
+      try { fs.rmdirSync(path.join(pf32, "iSmart Messenger")); } catch (_) {}
+    }
+  } catch (err) {
+    if (typeof writeLog === "function") {
+      writeLog(`cleanLegacyInstallation error: ${err.message}`);
+    }
+  }
 }
 
 function showMainWindow() {
@@ -845,7 +1140,7 @@ function createWindow(startUrl) {
     backgroundColor: titleBarPalette().color,
     titleBarStyle: "hidden",
     titleBarOverlay: {
-      ...titleBarPalette(), color: "rgba(0,0,0,0)",
+      ...titleBarPalette(),
       height: 34,
     },
     webPreferences: {
@@ -853,9 +1148,16 @@ function createWindow(startUrl) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      backgroundThrottling: false,
+      backgroundThrottling: true,
       webSecurity: false,
       allowRunningInsecureContent: true,
+      defaultFontFamily: {
+        standard: "NotoSansArabic",
+        serif: "NotoSansArabic",
+        sansSerif: "NotoSansArabic",
+        monospace: "Consolas",
+      },
+      defaultEncoding: "UTF-8",
     },
   });
   applyWindowTheme(currentWindowTheme);
@@ -898,6 +1200,27 @@ function createWindow(startUrl) {
       console.warn(`[renderer:${level}] ${message}`);
     }
   });
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    console.error(`[renderer] Render process gone: ${details.reason}`);
+    if (details.reason !== "clean-exit") {
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          console.log("[renderer] Reloading after unexpected exit...");
+          mainWindow.loadURL(startUrl || lastStartUrl);
+        }
+      }, 1000);
+    }
+  });
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
+    console.warn(`[renderer] Load failed (${errorCode}): ${errorDescription}`);
+    if (errorCode === -102 || errorCode === -105 || errorCode === -106) {
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.loadURL(startUrl || lastStartUrl);
+        }
+      }, 1500);
+    }
+  });
 
   // Limit memory usage
   mainWindow.webContents.session.setMaxListeners(10);
@@ -920,11 +1243,11 @@ function createWindow(startUrl) {
   const load = () => mainWindow.loadURL(startUrl || lastStartUrl);
   session
     .clearStorageData({
-      storages: ["serviceworkers", "cachestorage"],
+      storages: ["serviceworkers"],
     })
-    .then(() => session.clearCache())
+    .then(() => { /* preserve disk cache */ })
     .catch((error) => {
-      console.warn(`Failed to clear Electron web cache: ${error.message}`);
+      console.warn(`Failed to clear Electron serviceworkers: ${error.message}`);
     })
     .finally(load);
 }
@@ -1395,8 +1718,21 @@ function uniqueOutputPath(directory, fileName) {
   return candidate;
 }
 
+const _resolvedWebAssetCache = new Map();
+const _extractedAudioPathCache = new Map();
+const AUDIO_WORKER_IDLE_TIMEOUT_MS = 45000;
+const AUDIO_WORKER_PLAY_TIMEOUT_MS = 10000;
+const AUDIO_WORKER_MAX_QUEUE = 6;
+let _audioWorkerState = null;
+const _audioPlayQueue = [];
+let _audioQueueActive = false;
+
 function resolveWebAssetPath(assetPath) {
-  const normalized = String(assetPath || "")
+  const rawKey = String(assetPath || "").trim();
+  if (_resolvedWebAssetCache.has(rawKey)) {
+    return _resolvedWebAssetCache.get(rawKey);
+  }
+  const normalized = rawKey
     .replace(/\\/g, "/")
     .replace(/^\/+/, "");
   if (!normalized || normalized.includes("..")) {
@@ -1434,63 +1770,291 @@ function resolveWebAssetPath(assetPath) {
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
+      if (_resolvedWebAssetCache.size > 200) {
+        _resolvedWebAssetCache.clear();
+      }
+      _resolvedWebAssetCache.set(rawKey, candidate);
       return candidate;
     }
   }
+  if (_resolvedWebAssetCache.size > 200) {
+    _resolvedWebAssetCache.clear();
+  }
+  _resolvedWebAssetCache.set(rawKey, null);
   console.warn("[electron] asset not found", { assetPath, candidates });
   return null;
 }
 
-function playWavFile(filePath) {
-  return new Promise((resolve, reject) => {
-    if (process.platform !== "win32") {
-      reject(new Error("Audio preview is only implemented for Windows."));
-      return;
+async function resolvePlayableAudioPath(filePath) {
+  if (!filePath || !filePath.includes("app.asar")) {
+    return filePath;
+  }
+  const cached = _extractedAudioPathCache.get(filePath);
+  if (cached) {
+    return cached;
+  }
+  const tempDir = path.join(app.getPath("temp"), APP_NAME, "sounds");
+  await fs.promises.mkdir(tempDir, { recursive: true });
+  let pathHash = 2166136261;
+  for (let i = 0; i < filePath.length; i += 1) {
+    pathHash ^= filePath.charCodeAt(i);
+    pathHash = Math.imul(pathHash, 16777619) >>> 0;
+  }
+  const tempFilePath = path.join(tempDir, `${pathHash.toString(16)}_${path.basename(filePath)}`);
+  const alreadyExists = await fs.promises
+    .access(tempFilePath)
+    .then(() => true)
+    .catch(() => false);
+  if (!alreadyExists) {
+    const buffer = await fs.promises.readFile(filePath);
+    await fs.promises.writeFile(tempFilePath, buffer);
+  }
+  _extractedAudioPathCache.set(filePath, tempFilePath);
+  return tempFilePath;
+}
+
+function destroyAudioWorker(reason) {
+  const state = _audioWorkerState;
+  _audioWorkerState = null;
+  if (!state) {
+    return;
+  }
+  if (state.idleTimer) {
+    clearTimeout(state.idleTimer);
+    state.idleTimer = null;
+  }
+  if (state.itemTimer) {
+    clearTimeout(state.itemTimer);
+    state.itemTimer = null;
+  }
+  if (state.currentItem) {
+    const item = state.currentItem;
+    state.currentItem = null;
+    item.reject(new Error(reason || "Audio worker stopped."));
+  }
+  try {
+    state.proc.stdin.end();
+  } catch (_) {}
+  try {
+    state.proc.kill();
+  } catch (_) {}
+}
+
+function _scheduleAudioWorkerIdleShutdown(state) {
+  if (state.idleTimer) {
+    clearTimeout(state.idleTimer);
+  }
+  state.idleTimer = setTimeout(() => {
+    if (_audioWorkerState === state && !state.currentItem && _audioPlayQueue.length === 0) {
+      destroyAudioWorker("Idle audio worker shutdown.");
     }
+  }, AUDIO_WORKER_IDLE_TIMEOUT_MS);
+  if (typeof state.idleTimer.unref === "function") {
+    state.idleTimer.unref();
+  }
+}
 
-    let playPath = filePath;
-    let isTemp = false;
+function _ensureAudioWorker() {
+  if (_audioWorkerState) {
+    return _audioWorkerState;
+  }
+  const psScript = [
+    "[Console]::InputEncoding = [System.Text.Encoding]::UTF8;",
+    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;",
+    "$ErrorActionPreference = 'Stop';",
+    "Add-Type -AssemblyName System.Windows.Forms;",
+    "while (($b64 = [Console]::In.ReadLine()) -ne $null) {",
+    "  if ([string]::IsNullOrWhiteSpace($b64)) { continue }",
+    "  try {",
+    "    $p = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64));",
+    "    $player = New-Object System.Media.SoundPlayer($p);",
+    "    try {",
+    "      $player.Load();",
+    "      $player.PlaySync();",
+    "    } finally {",
+    "      $player.Dispose();",
+    "    }",
+    "    [Console]::Out.WriteLine('OK');",
+    "  } catch {",
+    "    [Console]::Out.WriteLine('ERR:' + $_.Exception.Message);",
+    "  }",
+    "  [Console]::Out.Flush();",
+    "}",
+  ].join(" ");
 
-    if (filePath && filePath.includes("app.asar")) {
-      try {
-        const tempDir = path.join(app.getPath("temp"), APP_NAME, "sounds");
-        fs.mkdirSync(tempDir, { recursive: true });
-        const tempFilePath = path.join(tempDir, path.basename(filePath));
-        fs.writeFileSync(tempFilePath, fs.readFileSync(filePath));
-        playPath = tempFilePath;
-        isTemp = true;
-      } catch (err) {
-        console.error("[electron] failed to extract sound from asar", err);
+  const proc = spawn(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", psScript],
+    { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] },
+  );
+
+  const state = {
+    proc,
+    stdoutBuffer: "",
+    currentItem: null,
+    itemTimer: null,
+    idleTimer: null,
+  };
+  _audioWorkerState = state;
+
+  proc.stdout.setEncoding("utf8");
+  proc.stdout.on("data", (chunk) => {
+    state.stdoutBuffer += chunk;
+    let newlineIndex = state.stdoutBuffer.indexOf("\n");
+    while (newlineIndex !== -1) {
+      const line = state.stdoutBuffer.slice(0, newlineIndex).trim();
+      state.stdoutBuffer = state.stdoutBuffer.slice(newlineIndex + 1);
+      newlineIndex = state.stdoutBuffer.indexOf("\n");
+      if (!line || !state.currentItem) {
+        continue;
+      }
+      if (state.itemTimer) {
+        clearTimeout(state.itemTimer);
+        state.itemTimer = null;
+      }
+      const item = state.currentItem;
+      state.currentItem = null;
+      if (line.startsWith("ERR:")) {
+        item.reject(new Error(line.slice(4) || "PowerShell SoundPlayer error"));
+      } else {
+        item.resolve();
       }
     }
+  });
 
-    const escapedPath = String(playPath || "").replace(/'/g, "''");
-    execFile(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        `$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.Windows.Forms; $player = New-Object System.Media.SoundPlayer('${escapedPath}'); $player.Load(); $player.PlaySync();`,
-      ],
-      { windowsHide: true },
-      (error) => {
-        if (isTemp) {
-          try {
-            fs.unlinkSync(playPath);
-          } catch (_) {}
+  proc.once("error", (err) => {
+    if (_audioWorkerState === state) {
+      destroyAudioWorker(err.message);
+    }
+  });
+
+  proc.once("exit", (code) => {
+    if (_audioWorkerState === state) {
+      destroyAudioWorker(`Audio worker exited (${code}).`);
+    }
+  });
+
+  return state;
+}
+
+async function _drainAudioQueue() {
+  if (_audioQueueActive) {
+    return;
+  }
+  _audioQueueActive = true;
+  try {
+    while (_audioPlayQueue.length > 0 && !isQuitting) {
+      const next = _audioPlayQueue.shift();
+      let state;
+      try {
+        state = _ensureAudioWorker();
+      } catch (err) {
+        next.reject(err);
+        continue;
+      }
+      if (state.idleTimer) {
+        clearTimeout(state.idleTimer);
+        state.idleTimer = null;
+      }
+      try {
+        await new Promise((resolve, reject) => {
+          state.currentItem = { resolve, reject };
+          state.itemTimer = setTimeout(() => {
+            if (_audioWorkerState === state && state.currentItem) {
+              destroyAudioWorker("Audio worker playback timed out.");
+            }
+          }, AUDIO_WORKER_PLAY_TIMEOUT_MS);
+          const encodedPath = Buffer.from(String(next.playPath || ""), "utf8").toString("base64");
+          state.proc.stdin.write(`${encodedPath}\n`, "utf8");
+        });
+        next.resolve();
+      } catch (err) {
+        next.reject(err);
+      }
+    }
+  } finally {
+    _audioQueueActive = false;
+    if (_audioWorkerState && !_audioWorkerState.currentItem && _audioPlayQueue.length === 0) {
+      _scheduleAudioWorkerIdleShutdown(_audioWorkerState);
+    }
+  }
+}
+
+async function _tryPlayAudioInRenderer(filePath) {
+  if (
+    !mainWindow ||
+    mainWindow.isDestroyed() ||
+    !mainWindow.isVisible() ||
+    mainWindow.isMinimized() ||
+    mainWindow.webContents.isDestroyed()
+  ) {
+    return false;
+  }
+  const root = webRoot();
+  const rel = path.relative(root, filePath).replace(/\\/g, "/");
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    return false;
+  }
+  try {
+    const js = `(() => {
+      try {
+        const audio = new Audio(${JSON.stringify(`/${rel}`)});
+        audio.volume = 1.0;
+        const p = audio.play();
+        if (p && typeof p.then === 'function') {
+          return Promise.race([
+            p.then(() => true).catch(() => false),
+            new Promise((r) => setTimeout(() => r(false), 600)),
+          ]);
         }
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve();
-      },
-    );
+        return true;
+      } catch (_) {
+        return false;
+      }
+    })()`;
+    const played = await mainWindow.webContents.executeJavaScript(js, true);
+    return played === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function playWavFile(filePath, { fromNotification = false } = {}) {
+  if (process.platform !== "win32") {
+    throw new Error("Audio preview is only implemented for Windows.");
+  }
+  if (await _tryPlayAudioInRenderer(filePath)) {
+    return;
+  }
+  const playPath = await resolvePlayableAudioPath(filePath);
+  if (fromNotification && _audioPlayQueue.length >= 2) {
+    return;
+  }
+  while (_audioPlayQueue.length >= AUDIO_WORKER_MAX_QUEUE) {
+    const dropped = _audioPlayQueue.shift();
+    dropped?.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    _audioPlayQueue.push({ playPath, resolve, reject });
+    unawaitedDrainAudioQueue();
   });
 }
 
-const _httpsAgentNoVerify = new https.Agent({ rejectUnauthorized: false });
+function unawaitedDrainAudioQueue() {
+  _drainAudioQueue().catch(() => {});
+}
+
+const _httpAgentKeepAlive = new http.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30000,
+  maxSockets: 6,
+});
+const _httpsAgentNoVerify = new https.Agent({
+  rejectUnauthorized: false,
+  keepAlive: true,
+  keepAliveMsecs: 30000,
+  maxSockets: 6,
+});
 
 function _doFetchOnce(targetUrl, headers, redirectCount) {
   return new Promise((resolve, reject) => {
@@ -1520,11 +2084,9 @@ function _doFetchOnce(targetUrl, headers, redirectCount) {
         Accept: "image/*,*/*;q=0.8",
         ...headers,
       },
-      timeout: 30000,
+      timeout: 12000, // reduced from 30s to 12s to avoid blocking main thread on slow VPN
+      agent: isHttps ? _httpsAgentNoVerify : _httpAgentKeepAlive,
     };
-    if (isHttps) {
-      requestOptions.agent = _httpsAgentNoVerify;
-    }
 
     const request = transport.request(
       parsed,
@@ -1578,8 +2140,92 @@ function _doFetchOnce(targetUrl, headers, redirectCount) {
   });
 }
 
+// Concurrency semaphore + in-flight deduplication + bounded LRU cache:
+// prevents duplicate avatar/image downloads from flooding slow branch VPNs.
+let _fetchUrlBufferActive = 0;
+const _fetchUrlBufferQueue = [];
+const _FETCH_URL_BUFFER_CONCURRENCY = 4;
+const _fetchUrlBufferInFlight = new Map();
+const _fetchUrlBufferCache = new Map();
+const _FETCH_URL_BUFFER_CACHE_MAX_ENTRIES = 64;
+const _FETCH_URL_BUFFER_CACHE_MAX_ITEM_BYTES = 512 * 1024;
+const _FETCH_URL_BUFFER_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function _rememberFetchedBuffer(cacheKey, result) {
+  if (
+    !result ||
+    !Buffer.isBuffer(result.buffer) ||
+    result.buffer.length === 0 ||
+    result.buffer.length > _FETCH_URL_BUFFER_CACHE_MAX_ITEM_BYTES
+  ) {
+    return;
+  }
+  const contentType = String(result.contentType || "").toLowerCase();
+  if (!contentType.startsWith("image/")) {
+    return;
+  }
+  _fetchUrlBufferCache.delete(cacheKey);
+  while (_fetchUrlBufferCache.size >= _FETCH_URL_BUFFER_CACHE_MAX_ENTRIES) {
+    const oldestKey = _fetchUrlBufferCache.keys().next().value;
+    _fetchUrlBufferCache.delete(oldestKey);
+  }
+  _fetchUrlBufferCache.set(cacheKey, {
+    buffer: result.buffer,
+    contentType: result.contentType,
+    cachedAt: Date.now(),
+  });
+}
+
+function _runNextFetch() {
+  while (_fetchUrlBufferActive < _FETCH_URL_BUFFER_CONCURRENCY && _fetchUrlBufferQueue.length > 0) {
+    const { task, resolve, reject } = _fetchUrlBufferQueue.shift();
+    _fetchUrlBufferActive++;
+    task().then(resolve, reject).finally(() => {
+      _fetchUrlBufferActive--;
+      _runNextFetch();
+    });
+  }
+}
+
 async function fetchUrlBuffer(targetUrl, headers = {}) {
-  const MAX_ATTEMPTS = 3;
+  const authHeader = String(headers?.Authorization || headers?.authorization || "").trim();
+  const fetchKey = `${targetUrl}\n${authHeader}`;
+
+  const cached = _fetchUrlBufferCache.get(fetchKey);
+  if (cached) {
+    if (Date.now() - cached.cachedAt < _FETCH_URL_BUFFER_CACHE_TTL_MS) {
+      _fetchUrlBufferCache.delete(fetchKey);
+      _fetchUrlBufferCache.set(fetchKey, cached);
+      return { buffer: cached.buffer, contentType: cached.contentType };
+    }
+    _fetchUrlBufferCache.delete(fetchKey);
+  }
+
+  const existingPromise = _fetchUrlBufferInFlight.get(fetchKey);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const promise = new Promise((resolve, reject) => {
+    _fetchUrlBufferQueue.push({
+      task: () => _fetchUrlBufferCore(targetUrl, headers),
+      resolve,
+      reject,
+    });
+    _runNextFetch();
+  }).then((result) => {
+    _rememberFetchedBuffer(fetchKey, result);
+    return result;
+  }).finally(() => {
+    _fetchUrlBufferInFlight.delete(fetchKey);
+  });
+
+  _fetchUrlBufferInFlight.set(fetchKey, promise);
+  return promise;
+}
+
+async function _fetchUrlBufferCore(targetUrl, headers = {}) {
+  const MAX_ATTEMPTS = 2; // reduced from 3 to 2 retries on slow VPN
   let lastError;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
@@ -1592,7 +2238,7 @@ async function fetchUrlBuffer(targetUrl, headers = {}) {
         break;
       }
       if (attempt < MAX_ATTEMPTS - 1) {
-        await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, 150)); // fixed 150ms delay, was 200*(attempt+1)
       }
     }
   }
@@ -1777,8 +2423,28 @@ function showLanReceiveNotification(entry) {
       title: "طلب استقبال ملف",
       body: `${entry.senderName} يريد إرسال ${entry.fileName} (${formatBytes(entry.fileSizeBytes)})`,
       silent: false,
+      timeoutType: "default",
     });
-    notification.on("click", () => openPendingLanReceiveDialog(entry.requestId));
+    const autoCloseTimer = setTimeout(() => {
+      try {
+        notification.close();
+      } catch (_) {}
+    }, 6000);
+    notification.on("click", () => {
+      clearTimeout(autoCloseTimer);
+      try {
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.show();
+          mainWindow.focus();
+        }
+        notification.close();
+      } catch (_) {}
+      openPendingLanReceiveDialog(entry.requestId);
+    });
+    notification.on("close", () => {
+      clearTimeout(autoCloseTimer);
+    });
     notification.show();
   } catch (error) {
     console.warn(`LAN receive notification failed: ${error.message}`);
@@ -1840,6 +2506,10 @@ function settlePendingLanReceiveRequest(entry, result) {
     return;
   }
   pendingLanReceiveRequests.delete(entry.requestId);
+  if (pendingLanReceiveRequests.size === 0 && lanReceiveReminderTimer) {
+    clearInterval(lanReceiveReminderTimer);
+    lanReceiveReminderTimer = null;
+  }
   if (entry.window && !entry.window.isDestroyed()) {
     entry.window.removeAllListeners("closed");
     entry.window.close();
@@ -1938,7 +2608,7 @@ function openPendingLanReceiveDialog(requestId) {
 <head>
 <meta charset="utf-8" />
 <style>
-*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",Tahoma,Arial,sans-serif;background:#0e1621;color:#f4f7fb}
+*{box-sizing:border-box}body{margin:0;font-family:"NotoSansArabic","NotoSans","Segoe UI",Tahoma,Arial,sans-serif;background:#0e1621;color:#f4f7fb}
 .wrap{height:100vh;padding:22px;background:linear-gradient(135deg,#111b26,#182533)}
 .head{display:flex;gap:14px;align-items:center;margin-bottom:18px}.icon{width:46px;height:46px;border-radius:14px;background:#2f8cff;display:grid;place-items:center;font-size:24px}
 h1{font-size:18px;margin:0 0 4px}.sub{font-size:13px;color:#a8b3c1;line-height:1.5}.file{background:#223142;border:1px solid #37516b;border-radius:10px;padding:12px;margin:14px 0;color:#dce8f5;direction:ltr;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2030,7 +2700,7 @@ function showLanReceiveDialog({ fileName, fileSizeBytes, senderName }) {
 <head>
 <meta charset="utf-8" />
 <style>
-*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",Tahoma,Arial,sans-serif;background:#0e1621;color:#f4f7fb}
+*{box-sizing:border-box}body{margin:0;font-family:"NotoSansArabic","NotoSans","Segoe UI",Tahoma,Arial,sans-serif;background:#0e1621;color:#f4f7fb}
 .wrap{height:100vh;padding:22px;background:linear-gradient(135deg,#111b26,#182533)}
 .head{display:flex;gap:14px;align-items:center;margin-bottom:18px}.icon{width:46px;height:46px;border-radius:14px;background:#2f8cff;display:grid;place-items:center;font-size:24px}
 h1{font-size:18px;margin:0 0 4px}.sub{font-size:13px;color:#a8b3c1;line-height:1.5}.file{background:#223142;border:1px solid #37516b;border-radius:10px;padding:12px;margin:14px 0;color:#dce8f5;direction:ltr;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2379,15 +3049,28 @@ async function printFile(target, printerName) {
   }
 }
 
-ipcMain.handle("app:get-device-info", async () => ({
-  hostName: os.hostname(),
-  localIp: localIpv4s()[0] || null,
-  localIps: localIpv4s(),
-  osName: process.platform,
-  osVersion: os.release(),
-  architecture: process.arch,
-  appVersion: app.getVersion(),
-}));
+ipcMain.handle("app:get-device-info", async () => {
+  const ranked = getRankedIpv4Addresses();
+  const seenIps = new Set();
+  const allIps = [];
+  for (const item of ranked) {
+    if (!seenIps.has(item.ip)) {
+      seenIps.add(item.ip);
+      allIps.push(item.ip);
+    }
+  }
+  const bestPhysical = ranked.find((item) => !item.isVirtual);
+  const bestIp = bestPhysical ? bestPhysical.ip : (allIps[0] || null);
+  return {
+    hostName: os.hostname(),
+    localIp: bestIp,
+    localIps: allIps,
+    osName: process.platform,
+    osVersion: os.release(),
+    architecture: process.arch,
+    appVersion: app.getVersion(),
+  };
+});
 
 ipcMain.handle("debug:log", async (_event, payload = {}) => {
   appendDebugLog(payload.scope, payload.message, payload.details);
@@ -2549,50 +3232,56 @@ ipcMain.handle("printers:list", async () => {
   }));
 });
 
+const NOTIFICATION_AUDIO_COOLDOWN_MS = 750;
+let _lastNotificationAudioAt = 0;
+
 ipcMain.handle("notifications:show", async (_event, payload = {}) => {
   const title = String(payload.title || APP_NAME);
   const body = String(payload.body || "");
   const soundAssetPath = String(payload.soundAssetPath || "").trim();
   const silent = true;
   try {
-    console.log("[electron] notifications:show", {
-      title,
-      body,
-      silent,
-      rawSilent: payload.silent,
-      soundAssetPath,
-    });
     if (soundAssetPath) {
-      const filePath = resolveWebAssetPath(soundAssetPath);
-      if (filePath) {
-        playWavFile(filePath).catch((error) =>
-          console.error("[electron] notification sound failed", error),
-        );
-      } else {
-        console.warn(
-          `[electron] notification sound asset was not found: ${soundAssetPath}`,
-        );
+      const now = Date.now();
+      if (now - _lastNotificationAudioAt >= NOTIFICATION_AUDIO_COOLDOWN_MS) {
+        const filePath = resolveWebAssetPath(soundAssetPath);
+        if (filePath) {
+          _lastNotificationAudioAt = now;
+          playWavFile(filePath, { fromNotification: true }).catch((error) =>
+            console.error("[electron] notification sound failed", error),
+          );
+        }
       }
     }
-    console.log(
-      `[electron] Notification.isSupported=${Notification.isSupported()} platform=${process.platform}`,
-    );
     if (Notification.isSupported()) {
-      const notif = new Notification({ title, body, silent });
+      const notif = new Notification({
+        title,
+        body,
+        silent,
+        timeoutType: "default",
+      });
+      const autoCloseTimer = setTimeout(() => {
+        try {
+          notif.close();
+        } catch (_) {}
+      }, 5000);
       try {
-        notif.on("show", () =>
-          console.log("[electron] native notification shown"),
-        );
-        notif.on("click", () =>
-          console.log("[electron] native notification clicked"),
-        );
+        notif.on("click", () => {
+          clearTimeout(autoCloseTimer);
+          try {
+            if (mainWindow) {
+              if (mainWindow.isMinimized()) mainWindow.restore();
+              mainWindow.show();
+              mainWindow.focus();
+            }
+            notif.close();
+          } catch (_) {}
+        });
+        notif.on("close", () => {
+          clearTimeout(autoCloseTimer);
+        });
       } catch (e) {}
       notif.show();
-      console.log("[electron] native notification created and show() called");
-    } else {
-      console.log(
-        "[electron] native Notification not supported on this platform",
-      );
     }
     if (mainWindow && !mainWindow.isFocused()) {
       mainWindow.flashFrame(true);
@@ -2640,6 +3329,308 @@ ipcMain.handle("window:set-theme", async (_event, payload = {}) => {
     String(payload.mode || "").toLowerCase() === "dark" ? "dark" : "light";
   applyWindowTheme(mode);
   return { success: true, mode: currentWindowTheme };
+});
+
+let currentBadgeCount = 0;
+
+function updateAppBadge(count, dataUrl) {
+  const validCount = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  currentBadgeCount = validCount;
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  // 1. Windows Taskbar Overlay Icon (16x16 crisp red badge)
+  if (process.platform === "win32") {
+    try {
+      if (validCount <= 0 || !dataUrl) {
+        mainWindow.setOverlayIcon(null, "");
+      } else {
+        const badgeImage = nativeImage.createFromDataURL(dataUrl);
+        if (!badgeImage.isEmpty()) {
+          const desc = validCount === 1 ? "رسالة جديدة واحدة" : `${validCount} رسائل غير مقروءة`;
+          mainWindow.setOverlayIcon(badgeImage, desc);
+        } else {
+          mainWindow.setOverlayIcon(null, "");
+        }
+      }
+    } catch (e) {
+      console.warn("[Badge] Failed to set overlay icon:", e.message);
+    }
+  }
+
+  // 2. Window Title
+  try {
+    const titlePrefix = validCount > 0 ? `(${validCount}) ` : "";
+    mainWindow.setTitle(`${titlePrefix}${APP_NAME}`);
+  } catch (_) {}
+
+  // 3. System Tray Tooltip
+  if (tray && !tray.isDestroyed()) {
+    try {
+      const tooltip = validCount > 0
+        ? `${APP_NAME} (${validCount} غير مقروء)`
+        : APP_NAME;
+      tray.setToolTip(tooltip);
+    } catch (_) {}
+  }
+
+  // 4. macOS / Linux Dock Badge
+  // CRITICAL: NEVER call app.setBadgeCount on Windows. On Windows, Chromium implements
+  // app.setBadgeCount by setting its own default dark charcoal overlay icon, which
+  // immediately overwrites and destroys our custom 16x16 vibrant red overlay badge!
+  if (process.platform === "darwin" && app.dock && typeof app.dock.setBadge === "function") {
+    try {
+      app.dock.setBadge(validCount > 0 ? String(validCount) : "");
+    } catch (_) {}
+  } else if (process.platform === "linux" && typeof app.setBadgeCount === "function") {
+    try {
+      app.setBadgeCount(validCount);
+    } catch (_) {}
+  }
+}
+
+ipcMain.handle("window:set-badge", async (_event, payload = {}) => {
+  const count = typeof payload === "number" ? payload : (payload?.count || 0);
+  const dataUrl = payload?.dataUrl || payload?.badgedIconUrl || null;
+  updateAppBadge(count, dataUrl);
+  return { success: true, count: currentBadgeCount };
+});
+
+
+const STORAGE_IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".ico"]);
+const STORAGE_AUDIO_EXTS = new Set([".m4a", ".aac", ".mp3", ".wav", ".ogg", ".opus", ".flac"]);
+const STORAGE_DOC_EXTS = new Set([".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".csv", ".zip", ".rar"]);
+
+function parseWindowsHdrop(buf) {
+  if (!buf || buf.length < 20) return [];
+  try {
+    const pFiles = buf.readUInt32LE(0);
+    const fWide = buf.readUInt32LE(16);
+    if (pFiles >= buf.length) return [];
+    if (fWide) {
+      const text = buf.subarray(pFiles).toString("utf16le");
+      return text.split("\0").map((s) => s.trim()).filter((p) => p.length > 0 && fs.existsSync(p));
+    } else {
+      const text = buf.subarray(pFiles).toString("utf8");
+      return text.split("\0").map((s) => s.trim()).filter((p) => p.length > 0 && fs.existsSync(p));
+    }
+  } catch (_) {
+    return [];
+  }
+}
+
+function getClipHelperPath() {
+  const devPath = path.join(__dirname, "clip_helper.exe");
+  if (fs.existsSync(devPath)) return devPath;
+  const unpackedPath = path.join(process.resourcesPath, "app.asar.unpacked", "clip_helper.exe");
+  if (fs.existsSync(unpackedPath)) return unpackedPath;
+  const resPath = path.join(process.resourcesPath, "clip_helper.exe");
+  if (fs.existsSync(resPath)) return resPath;
+  return null;
+}
+
+function getWindowsClipboardFilePathsHelper() {
+  const helperPath = getClipHelperPath();
+  if (!helperPath) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    execFile(
+      helperPath,
+      [],
+      { windowsHide: true, timeout: 2000, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout) => {
+        if (err) return resolve(null);
+        const raw = String(stdout || "").trim();
+        if (!raw || raw === "null") return resolve(null);
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            resolve(parsed.map((p) => String(p || "").trim()).filter(Boolean));
+          } else {
+            resolve(null);
+          }
+        } catch (_) {
+          resolve(null);
+        }
+      }
+    );
+  });
+}
+
+async function getWindowsClipboardFilePaths() {
+  if (process.platform !== "win32") {
+    return [];
+  }
+  try {
+    const { clipboard } = require("electron");
+
+    // Fast check 1: Can we read FileNameW buffer directly? (< 0.1ms)
+    // When files are copied in Windows Explorer, FileNameW buffer contains the first file path.
+    const fnBuf = clipboard.readBuffer("FileNameW");
+    let hasFileName = false;
+    let singleFile = "";
+    if (fnBuf && fnBuf.length > 2) {
+      const raw = fnBuf.toString("utf16le").replace(/\0.*$/, "").trim();
+      if (raw && fs.existsSync(raw)) {
+        hasFileName = true;
+        singleFile = raw;
+      }
+    }
+
+    // Fast check 2: Check CF_HDROP buffer (< 0.1ms)
+    const hdropBuf = clipboard.readBuffer("CF_HDROP");
+    const hdropPaths = parseWindowsHdrop(hdropBuf);
+    if (hdropPaths && hdropPaths.length > 0) {
+      return hdropPaths;
+    }
+
+    // Fast check 3: availableFormats
+    const formats = clipboard.availableFormats();
+    const hasFileFormats = formats.some((f) => {
+      const lower = f.toLowerCase();
+      return lower.includes("hdrop") || lower.includes("filename") || lower === "text/uri-list";
+    });
+
+    if (!hasFileName && !hasFileFormats) {
+      // Fast path: No file formats in clipboard at all — return immediately (0ms).
+      // Prevents running helper or PowerShell when user pastes plain text or empty clipboard.
+      return [];
+    }
+
+    // If files are present, call our instant 4KB C# helper (40-70ms) to get ALL files if multiple were copied
+    const helperPaths = await getWindowsClipboardFilePathsHelper();
+    if (helperPaths && helperPaths.length > 0) {
+      return helperPaths;
+    }
+
+    // If helper didn't return but we had singleFile from FileNameW:
+    if (singleFile) {
+      return [singleFile];
+    }
+  } catch (_) {}
+
+  // Last resort fallback: PowerShell if helper not available and native format didn't return
+  return getWindowsClipboardFilePathsPS();
+}
+
+function getWindowsClipboardFilePathsPS() {
+  return new Promise((resolve) => {
+    if (process.platform !== "win32") {
+      resolve([]);
+      return;
+    }
+    const psCommand = [
+      "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;",
+      "Add-Type -AssemblyName System.Windows.Forms;",
+      "if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {",
+      "  $files = [System.Windows.Forms.Clipboard]::GetFileDropList();",
+      "  @($files) | ConvertTo-Json -Compress",
+      "} else {",
+      "  '[]'",
+      "}"
+    ].join(" ");
+
+    execFile(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-STA", "-Command", psCommand],
+      { windowsHide: true, timeout: 4000, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout) => {
+        if (err) {
+          resolve([]);
+          return;
+        }
+        const raw = String(stdout || "").trim();
+        if (!raw || raw === "null") {
+          resolve([]);
+          return;
+        }
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            resolve(parsed.map((p) => String(p || "").trim()).filter(Boolean));
+          } else if (typeof parsed === "string" && parsed.trim()) {
+            resolve([parsed.trim()]);
+          } else {
+            resolve([]);
+          }
+        } catch (_) {
+          resolve([]);
+        }
+      },
+    );
+  });
+}
+
+ipcMain.handle("clipboard:read-files", async () => {
+  try {
+    const { clipboard } = require("electron");
+    const files = [];
+
+    // 1. Check for copied files from Windows Explorer (CF_HDROP / FileDropList)
+    const droppedPaths = await getWindowsClipboardFilePaths();
+    if (droppedPaths.length > 0) {
+      for (const filePath of droppedPaths) {
+        try {
+          const stat = await fs.promises.stat(filePath).catch(() => null);
+          if (!stat || !stat.isFile()) continue;
+          const fileName = path.basename(filePath);
+          const ext = path.extname(fileName).toLowerCase();
+          const isImage = STORAGE_IMAGE_EXTS.has(ext);
+
+          // PERFORMANCE FIX:
+          // Do NOT read gigantic Base64 strings for large files or documents!
+          // Only read Base64 for small images (<= 4MB) for instant thumbnail rendering.
+          // For all documents, archives, videos, or images > 4MB:
+          // Returning base64: "" completely eliminates Dart/V8 UI thread freezing.
+          let base64 = "";
+          if (isImage && stat.size <= 4 * 1024 * 1024) {
+            const buffer = await fs.promises.readFile(filePath);
+            base64 = buffer.toString("base64");
+          }
+
+          files.push({
+            name: fileName,
+            path: filePath,
+            size: stat.size,
+            base64,
+            isImage,
+          });
+        } catch (fileErr) {
+          console.warn("[electron] clipboard file read error:", fileErr);
+        }
+      }
+      if (files.length > 0) {
+        return { success: true, hasFiles: true, files };
+      }
+    }
+
+    // 2. Check for copied bitmap/screenshot image in clipboard
+    const clipImage = clipboard.readImage();
+    if (clipImage && !clipImage.isEmpty()) {
+      const pngBuffer = clipImage.toPNG();
+      if (pngBuffer && pngBuffer.length > 0) {
+        const fileName = `clipboard_${Date.now()}.png`;
+        files.push({
+          name: fileName,
+          path: fileName,
+          size: pngBuffer.length,
+          base64: pngBuffer.toString("base64"),
+          isImage: true,
+        });
+        return { success: true, hasFiles: true, files };
+      }
+    }
+    return { success: true, hasFiles: false, files: [] };
+  } catch (error) {
+    console.error("[electron] clipboard:read-files error", error);
+    return {
+      success: false,
+      hasFiles: false,
+      files: [],
+      error: String(error.message || error),
+    };
+  }
 });
 
 ipcMain.handle("window:list-open-windows", async () => {
@@ -2722,6 +3713,104 @@ ipcMain.handle("shell:open-rdp", async (_event, payload = {}) => {
   }
 });
 
+ipcMain.handle("shell:open-ping", async (_event, payload = {}) => {
+  try {
+    const ip = String(payload.ip || "").trim();
+    if (!ip) {
+      return { success: false, error: "No IP provided." };
+    }
+    const { exec } = require("child_process");
+    exec(`start cmd.exe /k ping ${ip}`, (err) => {
+      if (err) console.warn("[electron] ping error", err.message);
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("[electron] shell:open-ping error", error);
+    return { success: false, error: String(error.message || error) };
+  }
+});
+
+ipcMain.handle("net:probe-peer-status", async (_event, payload = {}) => {
+  const targetIp = normalizeLanIp(payload.ip || payload.targetIp);
+  if (!targetIp) {
+    return {
+      success: false,
+      ip: "",
+      message: "عنوان IP غير صالح أو غير محدد.",
+    };
+  }
+
+  const { exec } = require("child_process");
+  const net = require("net");
+
+  // 1. ICMP Ping check (Windows ping -n 1 -w 1200)
+  const pingPromise = new Promise((resolve) => {
+    exec(`ping -n 1 -w 1200 ${targetIp}`, (err, stdout) => {
+      if (err) {
+        resolve({ reachable: false, latency: null });
+        return;
+      }
+      const text = String(stdout || "");
+      const match = text.match(/time[=<](\d+ms)/i) || text.match(/الوقت[=<](\d+ms)/i);
+      resolve({ reachable: true, latency: match ? match[1] : "<10ms" });
+    });
+  });
+
+  // 2. TCP RDP port check (3389)
+  const rdpPromise = new Promise((resolve) => {
+    const socket = new net.Socket();
+    socket.setTimeout(1200);
+    socket.on("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.on("error", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.connect(3389, targetIp);
+  });
+
+  // 3. LAN App check (iSmart Messenger HTTP port)
+  const lanAppPromise = probeLanPeerAtIp(targetIp, 1200).catch(() => ({ success: false }));
+
+  const [pingRes, rdpOpen, lanRes] = await Promise.all([pingPromise, rdpPromise, lanAppPromise]);
+
+  const isReachable = pingRes.reachable || rdpOpen || lanRes.success === true;
+  let summary = "";
+  if (isReachable) {
+    const parts = [];
+    if (pingRes.reachable) {
+      parts.push(`Ping: متاح (${pingRes.latency || '<10ms'})`);
+    }
+    if (rdpOpen) {
+      parts.push("Remote Desktop: جاهز (بورت 3389 مفتوح)");
+    } else {
+      parts.push("Remote Desktop: بورت 3389 مغلق");
+    }
+    if (lanRes.success === true) {
+      parts.push("تطبيق المراسلة: متصل ونشط");
+    }
+    summary = parts.join(" | ");
+  } else {
+    summary = "الجهاز لا يستجيب في الشبكة المحلية (Ping أو RDP غير متاح). تأكد من تشغيل الجهاز واتصاله بنفس الشبكة.";
+  }
+
+  return {
+    success: isReachable,
+    ip: targetIp,
+    pingReachable: pingRes.reachable,
+    latency: pingRes.latency,
+    rdpAvailable: rdpOpen,
+    lanAppActive: lanRes.success === true,
+    message: summary,
+  };
+});
+
 ipcMain.handle("http:fetch-base64", async (_event, payload = {}) => {
   const url = String(payload.url || "").trim();
   const rawHeaders = payload.headers || {};
@@ -2751,44 +3840,60 @@ ipcMain.handle("http:fetch-base64", async (_event, payload = {}) => {
 });
 
 ipcMain.handle("files:save-base64", async (event, payload = {}) => {
+  const explicitPath = String(payload.filePath || "").trim();
   const requestedDirectory = String(payload.directoryPath || "").trim();
   let outputPath;
 
-  if (requestedDirectory) {
-    fs.mkdirSync(requestedDirectory, { recursive: true });
+  if (explicitPath) {
+    await fs.promises.mkdir(path.dirname(explicitPath), { recursive: true });
+    outputPath = explicitPath;
+  } else if (requestedDirectory) {
+    await fs.promises.mkdir(requestedDirectory, { recursive: true });
     outputPath = uniqueOutputPath(
       requestedDirectory,
       payload.fileName || "file",
     );
   } else {
-    const browserWindow = BrowserWindow.fromWebContents(event.sender);
+    const browserWindow = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    if (browserWindow && !browserWindow.isDestroyed()) {
+      if (browserWindow.isMinimized()) {
+        browserWindow.restore();
+      }
+      browserWindow.show();
+      browserWindow.focus();
+      browserWindow.setAlwaysOnTop(true);
+      browserWindow.setAlwaysOnTop(false);
+    }
     const defaultPath = path.join(app.getPath("downloads"), payload.fileName || "file");
     
-    const { canceled, filePath } = await dialog.showSaveDialog(browserWindow, {
-      title: "حفظ الملف",
-      defaultPath: defaultPath,
-    });
-
-    if (canceled || !filePath) {
-      return { success: false, message: "User canceled." };
+    let result;
+    try {
+      result = await dialog.showSaveDialog(browserWindow, {
+        title: "حفظ الملف",
+        defaultPath: defaultPath,
+      });
+    } catch (dialogErr) {
+      return { success: false, message: `Save dialog error: ${dialogErr.message}` };
     }
-    outputPath = filePath;
+
+    if (!result || result.canceled || !result.filePath) {
+      return { success: false, message: "تم إلغاء الحفظ بواسطة المستخدم." };
+    }
+    outputPath = result.filePath;
   }
 
   const buffer = Buffer.from(String(payload.base64 || ""), "base64");
   if (buffer.length > MAX_ELECTRON_FETCH_BYTES) {
     return { success: false, message: "File is too large to save from memory." };
   }
-  fs.writeFileSync(
-    outputPath,
-    buffer,
-  );
+  await fs.promises.writeFile(outputPath, buffer);
   return { success: true, savedPath: outputPath };
 });
 
 ipcMain.handle("files:exists", async (_event, payload = {}) => {
   const filePath = String(payload.path || "").trim();
-  return { success: true, exists: !!filePath && fs.existsSync(filePath) };
+  const exists = !!filePath && (await fs.promises.access(filePath).then(() => true).catch(() => false));
+  return { success: true, exists };
 });
 
 ipcMain.handle("files:open-local", async (_event, payload = {}) => {
@@ -2833,10 +3938,542 @@ ipcMain.handle("files:archive-chat-attachment", async (_event, payload = {}) => 
     payload.fileName || "attachment",
     payload.directoryPath,
   );
-  if (!fs.existsSync(outputPath)) {
-    fs.writeFileSync(outputPath, Buffer.from(String(payload.base64 || ""), "base64"));
+  try {
+    const dir = path.dirname(outputPath);
+    if (!fs.existsSync(dir)) {
+      await fs.promises.mkdir(dir, { recursive: true });
+    }
+    const exists = await fs.promises.access(outputPath).then(() => true).catch(() => false);
+    if (!exists) {
+      if (payload.sourcePath && fs.existsSync(payload.sourcePath)) {
+        await fs.promises.copyFile(payload.sourcePath, outputPath);
+      } else if (payload.base64) {
+        await fs.promises.writeFile(outputPath, Buffer.from(String(payload.base64 || ""), "base64"));
+      }
+    }
+    return { success: true, path: outputPath };
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
   }
-  return { success: true, path: outputPath };
+});
+
+const activeUploadRequests = new Map();
+
+ipcMain.handle("chat:cancel-upload", async (_event, transferId) => {
+  if (!transferId) return { success: false, message: "Missing transferId" };
+  const key = String(transferId).trim();
+  const active = activeUploadRequests.get(key);
+  if (active) {
+    try {
+      active.aborted = true;
+      if (active.fileStream) {
+        try { active.fileStream.destroy(); } catch (_) {}
+      }
+      if (active.req) {
+        try { active.req.destroy(new Error("Upload cancelled by user.")); } catch (_) {}
+      }
+    } catch (_) {}
+    activeUploadRequests.delete(key);
+    return { success: true, canceled: true };
+  }
+  return { success: false, message: "Upload not found or already finished." };
+});
+
+ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
+  const {
+    url,
+    filePath,
+    token,
+    conversationId,
+    content,
+    replyToMessageId,
+    fileName,
+    clientMessageId,
+    metadata,
+    transferId,
+  } = payload;
+
+  if (!url || !filePath || !fs.existsSync(filePath)) {
+    return { success: false, error: "Missing upload parameters or file does not exist." };
+  }
+
+  const uploadKey = transferId ? String(transferId).trim() : null;
+  const activeRecord = {
+    req: null,
+    fileStream: null,
+    aborted: false,
+  };
+  if (uploadKey) {
+    activeUploadRequests.set(uploadKey, activeRecord);
+  }
+
+  const maxAttempts = 3;
+  let lastError = "Upload failed.";
+
+  try {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (activeRecord.aborted) {
+        return { success: false, error: "تم إلغاء الرفع من قبل المستخدم.", isCancelled: true };
+      }
+    try {
+      const stat = await fs.promises.stat(filePath);
+      const boundary = "----iSmartUploadBoundary" + Date.now().toString(16) + Math.random().toString(16);
+      const resolvedFileName = fileName || path.basename(filePath);
+
+      // Build multipart preamble
+      const fields = {
+        conversationId: String(conversationId || ""),
+      };
+      if (content) fields.content = String(content);
+      if (replyToMessageId) fields.replyToMessageId = String(replyToMessageId);
+      if (fileName) fields.fileName = String(fileName);
+
+      let parsedMeta = null;
+      if (metadata) {
+        if (typeof metadata === "string") {
+          try { parsedMeta = JSON.parse(metadata); } catch (_) {}
+          fields.metadata = metadata;
+        } else {
+          parsedMeta = metadata;
+          fields.metadata = JSON.stringify(metadata);
+        }
+      }
+
+      const cId = clientMessageId || parsedMeta?.clientMessageId;
+      if (cId) fields.clientMessageId = String(cId);
+
+      let head = "";
+      for (const [k, v] of Object.entries(fields)) {
+        head += `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`;
+      }
+      head += `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${resolvedFileName}"\r\nContent-Type: application/octet-stream\r\n\r\n`;
+
+      const headBuf = Buffer.from(head, "utf8");
+      const tailBuf = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
+      const totalLength = headBuf.length + stat.size + tailBuf.length;
+
+      const parsedUrl = new URL(url);
+      const protocol = parsedUrl.protocol === "https:" ? https : http;
+
+      const result = await new Promise((resolve) => {
+        let isSettled = false;
+        const safeResolve = (val) => {
+          if (!isSettled) {
+            isSettled = true;
+            resolve(val);
+          }
+        };
+
+        const req = protocol.request(
+          parsedUrl,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": `multipart/form-data; boundary=${boundary}`,
+              "Content-Length": totalLength,
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          },
+          (res) => {
+            let responseBody = "";
+            res.on("data", (chunk) => {
+              responseBody += chunk;
+            });
+            res.on("end", () => {
+              const statusCode = res.statusCode || 0;
+              if (statusCode >= 200 && statusCode < 300) {
+                let parsedData = null;
+                try {
+                  parsedData = JSON.parse(responseBody);
+                } catch (_) {}
+                safeResolve({
+                  success: true,
+                  statusCode,
+                  responseJson: responseBody,
+                  data: parsedData,
+                });
+              } else {
+                try {
+                  const errJson = JSON.parse(responseBody);
+                  safeResolve({
+                    success: false,
+                    statusCode,
+                    error: errJson.message || `Upload failed with status ${statusCode}`,
+                  });
+                } catch (_) {
+                  safeResolve({
+                    success: false,
+                    statusCode,
+                    error: responseBody || `Upload failed with status ${statusCode}`,
+                  });
+                }
+              }
+            });
+          }
+        );
+
+        req.on("socket", (socket) => {
+          socket.setKeepAlive(true, 5000);
+          socket.setNoDelay(true);
+          socket.setTimeout(600000);
+          socket.on("timeout", () => {
+            console.warn("[Upload] Socket idle timeout reached");
+          });
+        });
+
+        req.on("error", (err) => {
+          if (activeRecord.aborted) {
+            safeResolve({ success: false, error: "تم إلغاء الرفع من قبل المستخدم.", isCancelled: true });
+          } else {
+            safeResolve({ success: false, error: err.message || String(err), isNetworkError: true });
+          }
+        });
+
+        activeRecord.req = req;
+
+        // Write preamble
+        req.write(headBuf);
+
+        // Stream file with backpressure handling (crucial for slow branch VPN networks)
+        const fileStream = fs.createReadStream(filePath, { highWaterMark: 64 * 1024 });
+        activeRecord.fileStream = fileStream;
+        let sentBytes = headBuf.length;
+        let lastUploadProgressAt = 0;
+
+        fileStream.on("data", (chunk) => {
+          sentBytes += chunk.length;
+          const ok = req.write(chunk);
+          if (!ok) {
+            fileStream.pause();
+          }
+          const now = Date.now();
+          if (
+            mainWindow &&
+            !mainWindow.isDestroyed() &&
+            transferId &&
+            (sentBytes >= totalLength || now - lastUploadProgressAt >= 150)
+          ) {
+            lastUploadProgressAt = now;
+            mainWindow.webContents.send("upload-progress", {
+              transferId,
+              sent: sentBytes,
+              total: totalLength,
+            });
+          }
+        });
+
+        req.on("drain", () => {
+          fileStream.resume();
+        });
+
+        fileStream.on("end", () => {
+          if (mainWindow && !mainWindow.isDestroyed() && transferId) {
+            mainWindow.webContents.send("upload-progress", {
+              transferId,
+              sent: totalLength,
+              total: totalLength,
+            });
+          }
+          req.write(tailBuf);
+          req.end();
+        });
+
+        fileStream.on("error", (err) => {
+          req.destroy();
+          safeResolve({ success: false, error: err.message || String(err) });
+        });
+      });
+
+      if (result.success) {
+        return result;
+      }
+
+      lastError = result.error || "Upload failed.";
+      // Don't retry if client error (4xx) like file too large or unauthorized
+      if (result.statusCode && result.statusCode >= 400 && result.statusCode < 500) {
+        return result;
+      }
+
+      if (attempt < maxAttempts) {
+        console.warn(`[Upload] Attempt ${attempt} failed: ${lastError}. Retrying in ${attempt * 1.5}s...`);
+        await sleep(attempt * 1500);
+      }
+    } catch (err) {
+      lastError = err.message || String(err);
+      if (attempt < maxAttempts && !activeRecord.aborted) {
+        await sleep(attempt * 1500);
+      }
+    }
+  }
+} finally {
+    if (uploadKey) {
+      activeUploadRequests.delete(uploadKey);
+    }
+  }
+
+  if (activeRecord.aborted) {
+    return { success: false, error: "تم إلغاء الرفع من قبل المستخدم.", isCancelled: true };
+  }
+
+  return { success: false, error: lastError };
+});
+
+const activeDownloadRequests = new Map();
+
+ipcMain.handle("files:download-chat-attachment", async (_event, payload = {}) => {
+  const { url, destinationPath, token, transferId } = payload;
+  if (!url || !destinationPath) {
+    return { success: false, error: "Missing url or destinationPath" };
+  }
+  try {
+    const dir = path.dirname(destinationPath);
+    if (!fs.existsSync(dir)) {
+      await fs.promises.mkdir(dir, { recursive: true });
+    }
+    let lastDownloadProgressAt = 0;
+    await downloadFile(url, destinationPath, token, (received, total) => {
+      const now = Date.now();
+      if (
+        mainWindow &&
+        !mainWindow.isDestroyed() &&
+        transferId &&
+        ((total > 0 && received >= total) || now - lastDownloadProgressAt >= 150)
+      ) {
+        lastDownloadProgressAt = now;
+        mainWindow.webContents.send("download-progress", {
+          transferId,
+          received,
+          total,
+        });
+      }
+    }, transferId);
+    return { success: true, path: destinationPath };
+  } catch (err) {
+    return { success: false, error: String(err && err.message ? err.message : err) };
+  }
+});
+
+ipcMain.handle("files:cancel-download", async (_event, transferId) => {
+  if (!transferId) return { success: false, message: "Missing transferId" };
+  const key = String(transferId).trim();
+  const active = activeDownloadRequests.get(key);
+  if (active) {
+    try {
+      if (active.request) active.request.destroy();
+    } catch (_) {}
+    try {
+      if (active.fileStream) active.fileStream.close();
+    } catch (_) {}
+    try {
+      if (active.destinationPath && fs.existsSync(active.destinationPath)) {
+        fs.unlinkSync(active.destinationPath);
+      }
+    } catch (_) {}
+    activeDownloadRequests.delete(key);
+    return { success: true, canceled: true };
+  }
+  return { success: false, message: "Download not found or already finished." };
+});
+
+ipcMain.handle("files:copy-file", async (_event, payload = {}) => {
+  const { sourcePath, destinationPath } = payload || {};
+  if (!sourcePath || !destinationPath || !fs.existsSync(sourcePath)) {
+    return { success: false, message: "Source file not found" };
+  }
+  try {
+    const dir = path.dirname(destinationPath);
+    if (!fs.existsSync(dir)) {
+      await fs.promises.mkdir(dir, { recursive: true });
+    }
+    await fs.promises.copyFile(sourcePath, destinationPath);
+    return { success: true, path: destinationPath };
+  } catch (err) {
+    return { success: false, error: String(err && err.message ? err.message : err) };
+  }
+});
+
+ipcMain.handle("files:calculate-sha256", async (_event, payload = {}) => {
+  const filePath = payload.filePath;
+  if (!filePath || !fs.existsSync(filePath)) {
+    return { success: false, sha256: "" };
+  }
+  return new Promise((resolve) => {
+    const hash = crypto.createHash("sha256");
+    const stream = fs.createReadStream(filePath);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolve({ success: true, sha256: hash.digest("hex") }));
+    stream.on("error", (err) => resolve({ success: false, error: err.message, sha256: "" }));
+  });
+});
+
+async function scanDirectoryStorage(dirPath) {
+  let appCache = 0;
+  let media = 0;
+  let audio = 0;
+  let docs = 0;
+  let scannedCount = 0;
+
+  const rootExists = await fs.promises
+    .access(dirPath)
+    .then(() => true)
+    .catch(() => false);
+  if (!rootExists) {
+    return { appCache, media, audio, docs };
+  }
+
+  async function walk(current) {
+    let entries;
+    try {
+      entries = await fs.promises.readdir(current, { withFileTypes: true });
+    } catch (_) {
+      return;
+    }
+    for (const entry of entries) {
+      scannedCount += 1;
+      if (scannedCount % 64 === 0) {
+        await new Promise((r) => setImmediate(r));
+      }
+      const full = path.join(current, entry.name);
+      try {
+        if (entry.isDirectory()) {
+          await walk(full);
+        } else if (entry.isFile()) {
+          const stat = await fs.promises.stat(full);
+          const size = stat.size;
+          const ext = path.extname(entry.name).toLowerCase();
+          if (STORAGE_IMAGE_EXTS.has(ext)) {
+            media += size;
+          } else if (STORAGE_AUDIO_EXTS.has(ext)) {
+            audio += size;
+          } else if (STORAGE_DOC_EXTS.has(ext)) {
+            docs += size;
+          } else {
+            appCache += size;
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  await walk(dirPath);
+  return { appCache, media, audio, docs };
+}
+
+ipcMain.handle("storage:get-breakdown", async (_event, payload = {}) => {
+  try {
+    const cacheDir = localStorageChildPath(path.join("Chat", "cache"), payload.directoryPath);
+    const tempDir = path.join(app.getPath("temp"), APP_NAME);
+
+    const [s1, s2] = await Promise.all([
+      scanDirectoryStorage(cacheDir),
+      scanDirectoryStorage(tempDir),
+    ]);
+
+    const appCacheBytes = s1.appCache + s2.appCache;
+    const mediaBytes = s1.media + s2.media;
+    const audioBytes = s1.audio + s2.audio;
+    const documentsBytes = s1.docs + s2.docs;
+
+    return {
+      success: true,
+      appCacheBytes,
+      mediaBytes,
+      audioBytes,
+      documentsBytes,
+      totalBytes: appCacheBytes + mediaBytes + audioBytes + documentsBytes,
+    };
+  } catch (err) {
+    console.error("[electron] storage:get-breakdown error", err);
+    return {
+      success: false,
+      appCacheBytes: 0,
+      mediaBytes: 0,
+      audioBytes: 0,
+      documentsBytes: 0,
+      totalBytes: 0,
+    };
+  }
+});
+
+ipcMain.handle("storage:clear-cache", async (_event, payload = {}) => {
+  try {
+    const category = String(payload.category || "all").toLowerCase();
+    const cacheDir = localStorageChildPath(path.join("Chat", "cache"), payload.directoryPath);
+    const tempDir = path.join(app.getPath("temp"), APP_NAME);
+
+    async function cleanDir(dirPath) {
+      const exists = await fs.promises
+        .access(dirPath)
+        .then(() => true)
+        .catch(() => false);
+      if (!exists) return;
+      let processedCount = 0;
+
+      async function walkDelete(current) {
+        let entries;
+        try {
+          entries = await fs.promises.readdir(current, { withFileTypes: true });
+        } catch (_) {
+          return;
+        }
+        for (const entry of entries) {
+          processedCount += 1;
+          if (processedCount % 64 === 0) {
+            await new Promise((r) => setImmediate(r));
+          }
+          const full = path.join(current, entry.name);
+          try {
+            if (entry.isDirectory()) {
+              await walkDelete(full);
+              try {
+                await fs.promises.rmdir(full);
+              } catch (_) {}
+            } else if (entry.isFile()) {
+              const ext = path.extname(entry.name).toLowerCase();
+              let del = false;
+              if (category === "all") del = true;
+              else if (category === "appcache" && !STORAGE_IMAGE_EXTS.has(ext) && !STORAGE_AUDIO_EXTS.has(ext) && !STORAGE_DOC_EXTS.has(ext)) del = true;
+              else if (category === "media" && STORAGE_IMAGE_EXTS.has(ext)) del = true;
+              else if (category === "audio" && STORAGE_AUDIO_EXTS.has(ext)) del = true;
+              else if (category === "documents" && STORAGE_DOC_EXTS.has(ext)) del = true;
+              if (del) {
+                await fs.promises.unlink(full);
+              }
+            }
+          } catch (_) {}
+        }
+      }
+      await walkDelete(dirPath);
+    }
+
+    await cleanDir(cacheDir);
+    await cleanDir(tempDir);
+    _ensuredStorageDirs.clear();
+
+    if (category === "all" || category === "appcache") {
+      try {
+        const { session } = require("electron");
+        if (session && session.defaultSession) {
+          await session.defaultSession.clearCache();
+        }
+      } catch (_) {}
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("[electron] storage:clear-cache error", err);
+    return { success: false, error: String(err.message || err) };
+  }
+});
+
+ipcMain.handle("files:get-chat-attachment-path", async (_event, payload = {}) => {
+  const filePath = chatAttachmentCachePath(
+    payload.messageId,
+    payload.fileName || "attachment",
+    payload.directoryPath,
+  );
+  const exists = fs.existsSync(filePath);
+  return { success: true, exists: exists, path: exists ? filePath : null };
 });
 
 ipcMain.handle("files:cache-chat-attachment", async (_event, payload = {}) => {
@@ -2845,8 +4482,9 @@ ipcMain.handle("files:cache-chat-attachment", async (_event, payload = {}) => {
     payload.fileName || "attachment",
     payload.directoryPath,
   );
-  if (!fs.existsSync(outputPath)) {
-    fs.writeFileSync(outputPath, Buffer.from(String(payload.base64 || ""), "base64"));
+  const exists = await fs.promises.access(outputPath).then(() => true).catch(() => false);
+  if (!exists) {
+    await fs.promises.writeFile(outputPath, Buffer.from(String(payload.base64 || ""), "base64"));
   }
   return { success: true, path: outputPath };
 });
@@ -2857,13 +4495,15 @@ ipcMain.handle("files:read-chat-attachment-cache", async (_event, payload = {}) 
     payload.fileName || "attachment",
     payload.directoryPath,
   );
-  if (!fs.existsSync(filePath)) {
+  const exists = await fs.promises.access(filePath).then(() => true).catch(() => false);
+  if (!exists) {
     return { success: false, message: "Cached attachment not found." };
   }
+  const buffer = await fs.promises.readFile(filePath);
   return {
     success: true,
     fileName: path.basename(filePath),
-    base64: fs.readFileSync(filePath).toString("base64"),
+    base64: buffer.toString("base64"),
   };
 });
 
@@ -2871,17 +4511,19 @@ ipcMain.handle("files:read-chat-archive", async (_event, payload = {}) => {
   const directory = localStorageChildPath(path.join("Chat", "sent"), payload.directoryPath);
   const safeMessageId = String(payload.messageId || "").replace(/[^\w.-]+/g, "_").toLowerCase();
   const safeHash = String(payload.sha256Hex || "").toLowerCase().replace(/[^a-f0-9]/g, "");
-  if (!safeMessageId || !safeHash || !fs.existsSync(directory)) {
+  if (!safeMessageId || !safeHash) {
     return { success: false, message: "Archive not found." };
   }
-  for (const name of fs.readdirSync(directory)) {
+  const entries = await fs.promises.readdir(directory).catch(() => []);
+  for (const name of entries) {
     const lower = name.toLowerCase();
     if (lower.startsWith(`${safeMessageId}_`) && lower.includes(safeHash)) {
       const filePath = path.join(directory, name);
+      const buffer = await fs.promises.readFile(filePath);
       return {
         success: true,
         fileName: name,
-        base64: fs.readFileSync(filePath).toString("base64"),
+        base64: buffer.toString("base64"),
       };
     }
   }
@@ -2904,7 +4546,7 @@ function downloadFileAndValidate(url, destinationPath, token) {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      request = protocol.get(parsedUrl, { headers }, (response) => {
+      request = protocol.get(parsedUrl, { headers, timeout: 30000 }, (response) => {
         const statusCode = response.statusCode || 0;
 
         if ([301, 302, 303, 307, 308].includes(statusCode) && response.headers.location) {
@@ -2949,6 +4591,9 @@ function downloadFileAndValidate(url, destinationPath, token) {
         });
       });
 
+      request.setTimeout(30000, () => {
+        request.destroy(new Error("Download request timed out after 30s."));
+      });
       request.on("error", (err) => {
         fileStream.close();
         try { fs.unlinkSync(destinationPath); } catch (_) {}
@@ -3012,6 +4657,72 @@ ipcMain.handle("dialog:pick-directory", async (_event, payload = {}) => {
   return { success: true, canceled: false, path: result.filePaths[0] };
 });
 
+ipcMain.handle("dialog:pick-files", async (_event, payload = {}) => {
+  const allowMultiple = payload.allowMultiple !== false;
+  const isImageOnly = payload.isImageOnly === true;
+  const filters = isImageOnly
+    ? [{ name: "Images", extensions: ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"] }]
+    : undefined;
+
+  const result = await dialog.showOpenDialog(mainWindow || undefined, {
+    title: String(payload.title || (isImageOnly ? "Select images" : "Select files")),
+    properties: allowMultiple ? ["openFile", "multiSelections"] : ["openFile"],
+    filters,
+  });
+
+  if (result.canceled || !result.filePaths.length) {
+    return { success: false, canceled: true, files: [] };
+  }
+
+  const files = [];
+  for (const fp of result.filePaths) {
+    try {
+      const stat = await fs.promises.stat(fp);
+      files.push({
+        path: fp,
+        name: require('path').basename(fp),
+        size: stat.size,
+      });
+    } catch (_) {
+      files.push({
+        path: fp,
+        name: require('path').basename(fp),
+        size: 0,
+      });
+    }
+  }
+
+  return { success: true, canceled: false, files };
+});
+
+ipcMain.handle("dialog:show-save-dialog", async (event, payload = {}) => {
+  const browserWindow = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (browserWindow && !browserWindow.isDestroyed()) {
+    if (browserWindow.isMinimized()) {
+      browserWindow.restore();
+    }
+    browserWindow.show();
+    browserWindow.focus();
+    browserWindow.setAlwaysOnTop(true);
+    browserWindow.setAlwaysOnTop(false);
+  }
+  const defaultPath = path.join(app.getPath("downloads"), payload.fileName || "file");
+
+  try {
+    const result = await dialog.showSaveDialog(browserWindow, {
+      title: String(payload.title || "نقل أو حفظ الملف في..."),
+      defaultPath: String(payload.defaultPath || defaultPath),
+    });
+
+    if (!result || result.canceled || !result.filePath) {
+      return { success: false, canceled: true, path: null };
+    }
+    return { success: true, canceled: false, path: result.filePath };
+  } catch (err) {
+    return { success: false, canceled: true, path: null, error: err.message };
+  }
+});
+
 ipcMain.handle("startup:set", async (_event, enabled) => {
   ensureStartup(enabled === true);
   return { success: true, enabled: enabled === true };
@@ -3031,100 +4742,485 @@ function calculateFileSha256(filePath) {
   });
 }
 
-function downloadFile(url, destinationPath, token, onProgress) {
+function downloadFile(url, destinationPath, token, onProgress, transferId, options = {}) {
   return new Promise((resolve, reject) => {
-    const fileStream = fs.createWriteStream(destinationPath);
-    let request;
+    const downloadKey = transferId ? String(transferId).trim() : null;
+    const partPath = destinationPath + ".part";
+    const partMetaPath = destinationPath + ".part.meta.json";
+    const expectedChecksum = options && options.checksumSha256 ? String(options.checksumSha256).trim().toLowerCase() : "";
+    const branchCodeHeader = options && options.branchCode ? String(options.branchCode).trim().toUpperCase() : "";
+    const deviceUidHeader = options && options.deviceUid ? String(options.deviceUid).trim() : "";
+    let isCancelled = false;
+    let isSettled = false;
+    let currentRequest = null;
+    let currentStream = null;
+    let retryTimer = null;
+    let attempt = 0;
+    let busyWaitCount = 0;
+    const maxAttempts = 10;
+    const maxBusyWaits = 20;
 
-    const startDownload = (targetUrl) => {
+    const settleResolve = (value) => {
+      if (isSettled) return;
+      isSettled = true;
+      resolve(value);
+    };
+    const settleReject = (err) => {
+      if (isSettled) return;
+      isSettled = true;
+      reject(err);
+    };
+
+    const getUrlKey = (u) => {
+      try {
+        const p = new URL(u);
+        return p.origin + p.pathname;
+      } catch (_) {
+        return String(u || "");
+      }
+    };
+    const baseUrlKey = getUrlKey(url);
+
+    const readPartMeta = () => {
+      try {
+        if (fs.existsSync(partMetaPath)) {
+          return JSON.parse(fs.readFileSync(partMetaPath, "utf8"));
+        }
+      } catch (_) {}
+      return null;
+    };
+
+    const writePartMeta = (meta) => {
+      try {
+        fs.writeFileSync(partMetaPath, JSON.stringify(meta), "utf8");
+      } catch (_) {}
+    };
+
+    const clearPartialArtifacts = () => {
+      try { if (fs.existsSync(partPath)) fs.unlinkSync(partPath); } catch (_) {}
+      try { if (fs.existsSync(partMetaPath)) fs.unlinkSync(partMetaPath); } catch (_) {}
+    };
+
+    // Guard against stale or mismatched .part files from a previous version or failed run
+    if (fs.existsSync(partPath)) {
+      const savedMeta = readPartMeta();
+      const urlMatches = savedMeta && savedMeta.urlKey === baseUrlKey;
+      const checksumMatches = !expectedChecksum || !savedMeta || !savedMeta.checksumSha256 || savedMeta.checksumSha256.toLowerCase() === expectedChecksum;
+      if (!savedMeta || !urlMatches || !checksumMatches) {
+        clearPartialArtifacts();
+      }
+    }
+
+    if (downloadKey) {
+      activeDownloadRequests.set(downloadKey, {
+        get request() { return currentRequest; },
+        get fileStream() { return currentStream; },
+        destinationPath,
+        partPath,
+        cancel: () => {
+          isCancelled = true;
+          if (retryTimer) {
+            clearTimeout(retryTimer);
+            retryTimer = null;
+          }
+          try { if (currentRequest) currentRequest.destroy(); } catch (_) {}
+          try { if (currentStream) currentStream.destroy(); } catch (_) {}
+          clearPartialArtifacts();
+          try { if (fs.existsSync(destinationPath)) fs.unlinkSync(destinationPath); } catch (_) {}
+          settleReject(new Error("Download cancelled by user."));
+        }
+      });
+    }
+
+    const runAttempt = (targetUrl) => {
+      if (isCancelled) {
+        return settleReject(new Error("Download cancelled by user."));
+      }
+
+      let attemptSettled = false;
+      let responseEndedNormally = false;
+      let timeoutTimer = null;
+
+      let existingBytes = 0;
+      try {
+        if (fs.existsSync(partPath)) {
+          existingBytes = fs.statSync(partPath).size;
+        }
+      } catch (_) {
+        existingBytes = 0;
+      }
+
+      const savedMeta = readPartMeta();
       const parsedUrl = new URL(targetUrl);
       const protocol = parsedUrl.protocol === "https:" ? https : http;
 
       const headers = {
         "Accept": "*/*",
+        "Cache-Control": "no-cache",
       };
       if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
+        headers["Authorization"] = "Bearer " + token;
+      }
+      if (branchCodeHeader) {
+        headers["X-Branch-Code"] = branchCodeHeader;
+      }
+      if (deviceUidHeader) {
+        headers["X-Device-Uid"] = deviceUidHeader;
+      }
+      if (existingBytes > 0) {
+        headers["Range"] = "bytes=" + existingBytes + "-";
+        if (savedMeta && savedMeta.etag) {
+          headers["If-Range"] = savedMeta.etag;
+        }
       }
 
-      request = protocol.get(parsedUrl, { headers }, (response) => {
+      const failAttempt = (err, { resetPartial = false } = {}) => {
+        if (attemptSettled) return;
+        attemptSettled = true;
+        if (timeoutTimer) {
+          clearTimeout(timeoutTimer);
+          timeoutTimer = null;
+        }
+        const streamToClose = currentStream;
+        currentStream = null;
+        try { if (currentRequest) currentRequest.destroy(); } catch (_) {}
+        currentRequest = null;
+        if (streamToClose) {
+          try { streamToClose.destroy(); } catch (_) {}
+        }
+        if (resetPartial) {
+          clearPartialArtifacts();
+        }
+        handleRetryOrReject(err, url);
+      };
+
+      const resetInactivityTimer = () => {
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        timeoutTimer = setTimeout(() => {
+          if (!isCancelled && !attemptSettled) {
+            console.warn("[downloadFile] Inactivity timeout (45s no data) on VPN link, retrying...");
+            failAttempt(new Error("ETIMEDOUT: Connection inactive on VPN link"));
+          }
+        }, 45000);
+      };
+
+      resetInactivityTimer();
+
+      currentRequest = protocol.get(parsedUrl, { headers, timeout: 30000 }, (response) => {
+        if (attemptSettled) {
+          response.resume();
+          return;
+        }
+
         const statusCode = response.statusCode || 0;
 
-        // Handle redirects (e.g. 302 Found)
+        // Handle redirects (e.g. 301, 302, 303, 307, 308)
         if ([301, 302, 303, 307, 308].includes(statusCode) && response.headers.location) {
+          attemptSettled = true;
+          if (timeoutTimer) clearTimeout(timeoutTimer);
           response.resume();
-          fileStream.close();
-          try { fs.unlinkSync(destinationPath); } catch (_) {}
-          
           const redirectUrl = new URL(response.headers.location, parsedUrl).toString();
-          downloadFile(redirectUrl, destinationPath, token, onProgress).then(resolve).catch(reject);
-          return;
+          return runAttempt(redirectUrl);
         }
 
-        if (statusCode !== 200) {
+        // Handle 429 / 503 update download admission queue without burning fatal retries or deleting .part
+        if (statusCode === 429 || statusCode === 503) {
+          attemptSettled = true;
+          if (timeoutTimer) {
+            clearTimeout(timeoutTimer);
+            timeoutTimer = null;
+          }
           response.resume();
-          fileStream.close();
-          try { fs.unlinkSync(destinationPath); } catch (_) {}
-          reject(new Error(`Failed to download. Status code: ${statusCode}`));
+          busyWaitCount += 1;
+          if (busyWaitCount > maxBusyWaits) {
+            attemptSettled = false;
+            return failAttempt(
+              new Error("Download server busy too long. Status code: " + statusCode),
+            );
+          }
+          const rawRetryAfter = parseInt(String(response.headers["retry-after"] || ""), 10);
+          const baseWaitSec =
+            Number.isFinite(rawRetryAfter) && rawRetryAfter > 0
+              ? Math.min(Math.max(rawRetryAfter, 5), 90)
+              : 15;
+          const jitterMs = Math.floor(Math.random() * 9000) + 1000;
+          const waitMs = baseWaitSec * 1000 + jitterMs;
+          console.warn(
+            `[downloadFile] Server busy (HTTP ${statusCode}), keeping partial file and retrying in ${waitMs}ms (wait ${busyWaitCount}/${maxBusyWaits})...`,
+          );
+          if (retryTimer) {
+            clearTimeout(retryTimer);
+          }
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            if (!isCancelled) {
+              runAttempt(url);
+            }
+          }, waitMs);
           return;
         }
 
-        const totalBytes = parseInt(response.headers["content-length"] || "0", 10);
+        // Handle 416 Range Not Satisfiable (file size changed on server or corrupted .part)
+        if (statusCode === 416) {
+          attemptSettled = true;
+          if (timeoutTimer) clearTimeout(timeoutTimer);
+          response.resume();
+          clearPartialArtifacts();
+          return runAttempt(url);
+        }
+
+        const isPartial = statusCode === 206;
+        if (statusCode !== 200 && !isPartial) {
+          response.resume();
+          return failAttempt(new Error("Failed to download. Status code: " + statusCode));
+        }
+
+        let totalBytes = 0;
         let receivedBytes = 0;
 
+        if (isPartial) {
+          const contentRange = response.headers["content-range"] || "";
+          const rangeMatch = contentRange.match(/^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i);
+          if (!rangeMatch) {
+            response.resume();
+            return failAttempt(new Error("Invalid Content-Range header on 206 response"), { resetPartial: true });
+          }
+          const rangeStart = parseInt(rangeMatch[1], 10);
+          if (rangeStart !== existingBytes) {
+            response.resume();
+            return failAttempt(
+              new Error("Range offset mismatch: requested " + existingBytes + ", server sent " + rangeStart),
+              { resetPartial: true }
+            );
+          }
+          if (rangeMatch[3] !== "*") {
+            totalBytes = parseInt(rangeMatch[3], 10);
+          } else if (response.headers["content-length"]) {
+            totalBytes = existingBytes + parseInt(response.headers["content-length"], 10);
+          }
+          receivedBytes = existingBytes;
+        } else {
+          totalBytes = parseInt(response.headers["content-length"] || response.headers["x-file-size"] || "0", 10);
+          receivedBytes = 0;
+        }
+
+        if (!totalBytes && response.headers["x-file-size"]) {
+          totalBytes = parseInt(response.headers["x-file-size"], 10) || 0;
+        }
+
+        const serverChecksum = response.headers["x-checksum-sha256"]
+          ? String(response.headers["x-checksum-sha256"]).trim().toLowerCase()
+          : null;
+        if (expectedChecksum && serverChecksum && serverChecksum !== expectedChecksum) {
+          response.resume();
+          return failAttempt(new Error("Server checksum header mismatch"), { resetPartial: true });
+        }
+
+        writePartMeta({
+          urlKey: baseUrlKey,
+          etag: response.headers["etag"] || null,
+          totalBytes: totalBytes || 0,
+          checksumSha256: expectedChecksum || serverChecksum || null,
+        });
+
+        // Write mode: append only when verified 206 matches existingBytes, otherwise overwrite from 0
+        const writeMode = isPartial ? "a" : "w";
+
+        try {
+          currentStream = fs.createWriteStream(partPath, { flags: writeMode });
+        } catch (streamErr) {
+          response.resume();
+          return failAttempt(streamErr);
+        }
+
+        resetInactivityTimer();
+
         response.on("data", (chunk) => {
+          if (isCancelled || attemptSettled) {
+            response.resume();
+            return;
+          }
           receivedBytes += chunk.length;
-          fileStream.write(chunk);
-          if (onProgress && totalBytes > 0) {
+          if (currentStream) {
+            currentStream.write(chunk);
+          }
+          resetInactivityTimer();
+          if (onProgress) {
             onProgress(receivedBytes, totalBytes);
           }
         });
 
         response.on("end", () => {
-          fileStream.end();
+          if (timeoutTimer) clearTimeout(timeoutTimer);
+          if (isCancelled || attemptSettled) return;
+          if (!response.complete) {
+            return failAttempt(new Error("HTTP response ended prematurely before EOF"));
+          }
+          responseEndedNormally = true;
+          if (currentStream) {
+            currentStream.end();
+          }
+        });
+
+        response.on("aborted", () => {
+          failAttempt(new Error("Download connection aborted by peer/VPN"));
+        });
+
+        response.on("close", () => {
+          if (!responseEndedNormally && !attemptSettled && !isCancelled) {
+            failAttempt(new Error("Download connection closed before EOF"));
+          }
         });
 
         response.on("error", (err) => {
-          fileStream.close();
-          try { fs.unlinkSync(destinationPath); } catch (_) {}
-          reject(err);
+          failAttempt(err);
+        });
+
+        currentStream.on("finish", () => {
+          if (timeoutTimer) clearTimeout(timeoutTimer);
+          if (isCancelled || attemptSettled) return;
+          if (!responseEndedNormally) {
+            return failAttempt(new Error("Stream finished before response completed"));
+          }
+
+          let actualSize = 0;
+          try {
+            actualSize = fs.existsSync(partPath) ? fs.statSync(partPath).size : 0;
+          } catch (_) {
+            actualSize = 0;
+          }
+
+          if (actualSize <= 0) {
+            return failAttempt(new Error("Downloaded file is empty (0 bytes)"), { resetPartial: true });
+          }
+
+          if (totalBytes > 0) {
+            if (actualSize > totalBytes) {
+              return failAttempt(
+                new Error("Corrupted download: file size (" + actualSize + ") exceeds expected (" + totalBytes + ")"),
+                { resetPartial: true }
+              );
+            }
+            if (actualSize < totalBytes || receivedBytes !== totalBytes) {
+              return failAttempt(
+                new Error("Incomplete download: received " + actualSize + " of " + totalBytes + " bytes")
+              );
+            }
+          }
+
+          attemptSettled = true;
+          currentStream = null;
+          currentRequest = null;
+
+          try {
+            if (fs.existsSync(destinationPath)) {
+              try { fs.unlinkSync(destinationPath); } catch (_) {}
+            }
+            fs.renameSync(partPath, destinationPath);
+            try { if (fs.existsSync(partMetaPath)) fs.unlinkSync(partMetaPath); } catch (_) {}
+            if (downloadKey) activeDownloadRequests.delete(downloadKey);
+            settleResolve({
+              filePath: destinationPath,
+              totalBytes: totalBytes || actualSize,
+              actualSize,
+              checksumHeader: serverChecksum,
+            });
+          } catch (renameErr) {
+            settleReject(renameErr);
+          }
+        });
+
+        currentStream.on("error", (err) => {
+          failAttempt(err);
         });
       });
 
-      request.on("error", (err) => {
-        fileStream.close();
-        try { fs.unlinkSync(destinationPath); } catch (_) {}
-        reject(err);
+      currentRequest.setTimeout(30000, () => {
+        failAttempt(new Error("Download request socket timed out"));
+      });
+
+      currentRequest.on("error", (err) => {
+        failAttempt(err);
       });
     };
 
-    fileStream.on("finish", () => {
-      resolve();
-    });
+    const handleRetryOrReject = (err, targetUrl) => {
+      if (isCancelled) {
+        return settleReject(new Error("Download cancelled by user."));
+      }
 
-    fileStream.on("error", (err) => {
-      fileStream.close();
-      try { fs.unlinkSync(destinationPath); } catch (_) {}
-      reject(err);
-    });
+      attempt++;
+      if (attempt < maxAttempts) {
+        const delay = Math.min(1000 * Math.pow(1.5, attempt - 1), 10000);
+        console.warn("[downloadFile] Download attempt " + attempt + "/" + maxAttempts + " failed (" + err.message + "). Resuming in " + delay + "ms...");
+        if (retryTimer) {
+          clearTimeout(retryTimer);
+        }
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          if (!isCancelled) {
+            runAttempt(targetUrl);
+          }
+        }, delay);
+      } else {
+        console.error("[downloadFile] Download permanently failed after " + maxAttempts + " attempts:", err);
+        clearPartialArtifacts();
+        if (downloadKey) activeDownloadRequests.delete(downloadKey);
+        settleReject(err);
+      }
+    };
 
-    startDownload(url);
+    runAttempt(url);
   });
 }
 
+function detectFileType(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return "none";
+    const stat = fs.statSync(filePath);
+    if (stat.size < 4) return "unknown";
+    const fd = fs.openSync(filePath, "r");
+    const buffer = Buffer.alloc(4);
+    fs.readSync(fd, buffer, 0, 4, 0);
+    fs.closeSync(fd);
+    
+    // Check for MZ (0x4D, 0x5A) -> Windows Executable (.exe)
+    if (buffer[0] === 0x4d && buffer[1] === 0x5a) {
+      return "exe";
+    }
+    // Check for PK (0x50, 0x4B) -> Zip Archive (.zip)
+    if (buffer[0] === 0x50 && buffer[1] === 0x4b) {
+      return "zip";
+    }
+    // Check for MSI compound document (0xD0, 0xCF, 0x11, 0xE0)
+    if (buffer[0] === 0xd0 && buffer[1] === 0xcf && buffer[2] === 0x11 && buffer[3] === 0xe0) {
+      return "msi";
+    }
+  } catch (err) {
+    console.error("detectFileType error:", err);
+  }
+  return "unknown";
+}
+
 ipcMain.handle("updater:start-update", async (event, payload = {}) => {
-  const { downloadUrl, token, checksumSha256 } = payload;
+  const {
+    downloadUrl,
+    token,
+    checksumSha256,
+    fileName,
+    silentInstallArgs,
+    installerKind,
+    branchCode,
+    deviceUid,
+  } = payload;
   if (!downloadUrl) {
     throw new Error("Missing download URL");
   }
 
   const tempDir = path.join(app.getPath("temp"), APP_NAME);
   fs.mkdirSync(tempDir, { recursive: true });
-  const updateZipPath = path.join(tempDir, "app-update.zip");
 
-  if (fs.existsSync(updateZipPath)) {
-    try { fs.unlinkSync(updateZipPath); } catch (_) {}
-  }
+  const tempDownloadPath = path.join(tempDir, "update-download.tmp");
 
   try {
     let lastProgressEventAt = 0;
@@ -3140,8 +5236,8 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
         payload.status === "downloading" &&
         progress !== 0 &&
         progress !== 100 &&
-        progress - lastProgressValue < 2 &&
-        now - lastProgressEventAt < 700
+        progress === lastProgressValue &&
+        now - lastProgressEventAt < 150
       ) {
         return;
       }
@@ -3150,42 +5246,194 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
       mainWindow.webContents.send("updater-progress", payload);
     };
 
+    // Reuse an already-downloaded and cryptographically verified update package if present
+    const reuseCheck = await updaterHelpers.validatePreparedPackage({
+      tempDir,
+      downloadUrl,
+      checksumSha256,
+      fileName,
+      detectFileType,
+      calculateFileSha256,
+      requireMatchForReuse: true,
+    });
+    if (reuseCheck.prepared) {
+      try {
+        const refreshedMeta = {
+          ...(reuseCheck.meta || {}),
+          packagePath: reuseCheck.packagePath,
+          packageType: reuseCheck.packageType,
+          fileName:
+            fileName ||
+            (reuseCheck.meta && reuseCheck.meta.fileName) ||
+            path.basename(reuseCheck.packagePath),
+          downloadUrl:
+            downloadUrl || (reuseCheck.meta && reuseCheck.meta.downloadUrl) || "",
+          checksumSha256:
+            reuseCheck.checksumSha256 ||
+            (reuseCheck.meta && reuseCheck.meta.checksumSha256) ||
+            null,
+          expectedSize: reuseCheck.fileSize,
+          silentInstallArgs:
+            silentInstallArgs ||
+            (reuseCheck.meta && reuseCheck.meta.silentInstallArgs) ||
+            "",
+          installerKind:
+            installerKind || (reuseCheck.meta && reuseCheck.meta.installerKind) || "",
+          previousVersion: app.getVersion(),
+        };
+        fs.writeFileSync(
+          path.join(tempDir, "update-meta.json"),
+          JSON.stringify(refreshedMeta, null, 2),
+          "utf8"
+        );
+        updaterHelpers.clearUpdateResult(tempDir);
+      } catch (_) {}
+
+      sendUpdaterProgress({
+        status: "downloaded",
+        progress: 100,
+        message: "حزمة التحديث محملة ومفحوصة مسبقاً وجاهزة للتثبيت.",
+      }, { force: true });
+
+      return {
+        success: true,
+        reused: true,
+        filePath: reuseCheck.packagePath,
+        packageType: reuseCheck.packageType,
+      };
+    }
+
+    // Clean up previous mismatched/incomplete update output artifacts (keep matching .part ONLY if verified in downloadFile)
+    const cleanups = [
+      "update-download.tmp",
+      "update-installer.exe",
+      "update-installer.msi",
+      "update-package.zip",
+      "app-update.zip",
+      "update-meta.json",
+      "update-result.json",
+    ];
+    for (const c of cleanups) {
+      try {
+        const p = path.join(tempDir, c);
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+      } catch (_) {}
+    }
+
     sendUpdaterProgress({
       status: "downloading",
       progress: 0,
       message: "جاري بدء تحميل التحديث...",
     }, { force: true });
 
-    await downloadFile(downloadUrl, updateZipPath, token, (received, total) => {
-      const progress = Math.round((received / total) * 100);
-      sendUpdaterProgress({
-        status: "downloading",
-        progress: progress,
-        message: `جاري تحميل التحديث: ${progress}%`,
-      });
-    });
+    const downloadResult = await downloadFile(
+      downloadUrl,
+      tempDownloadPath,
+      token,
+      (received, total) => {
+        let progress = 0;
+        let message = "";
+        if (total > 0) {
+          progress = Math.min(95, Math.round((received / total) * 100));
+          const receivedMb = (received / (1024 * 1024)).toFixed(1);
+          const totalMb = (total / (1024 * 1024)).toFixed(1);
+          message = `جاري تحميل التحديث: ${progress}% (${receivedMb} / ${totalMb} MB)`;
+        } else {
+          const receivedMb = (received / (1024 * 1024)).toFixed(1);
+          progress = Math.min(90, Math.round((received / (60 * 1024 * 1024)) * 100));
+          message = `جاري تحميل التحديث: ${receivedMb} MB`;
+        }
+        sendUpdaterProgress({
+          status: "downloading",
+          progress: progress,
+          message: message,
+        });
+      },
+      null,
+      { checksumSha256, branchCode, deviceUid }
+    );
 
-    if (checksumSha256 && checksumSha256.trim()) {
+    const effectiveChecksum =
+      (checksumSha256 && checksumSha256.trim()) ||
+      (downloadResult && downloadResult.checksumHeader) ||
+      "";
+
+    if (effectiveChecksum) {
       sendUpdaterProgress({
         status: "downloading",
-        progress: 95,
-        message: "جاري التحقق من سلامة ملف التحديث...",
+        progress: 96,
+        message: "جاري التحقق من سلامة وبصمة ملف التحديث...",
       }, { force: true });
-      const calculatedHash = await calculateFileSha256(updateZipPath);
-      if (calculatedHash.toLowerCase() !== checksumSha256.trim().toLowerCase()) {
-        throw new Error(`بصمة الملف غير مطابقة! المتوقع: ${checksumSha256.trim().toLowerCase()}، المحسوب: ${calculatedHash.toLowerCase()}`);
+      const calculatedHash = await calculateFileSha256(tempDownloadPath);
+      if (calculatedHash.toLowerCase() !== effectiveChecksum.trim().toLowerCase()) {
+        // Delete corrupted artifact + partials immediately so next run downloads fresh
+        try { if (fs.existsSync(tempDownloadPath)) fs.unlinkSync(tempDownloadPath); } catch (_) {}
+        try { if (fs.existsSync(tempDownloadPath + ".part")) fs.unlinkSync(tempDownloadPath + ".part"); } catch (_) {}
+        try { if (fs.existsSync(tempDownloadPath + ".part.meta.json")) fs.unlinkSync(tempDownloadPath + ".part.meta.json"); } catch (_) {}
+        throw new Error(`بصمة ملف التحديث غير مطابقة (الملف تالف أو غير مكتمل)! المتوقع: ${effectiveChecksum.trim().toLowerCase()}، المحسوب: ${calculatedHash.toLowerCase()}`);
       }
     }
+
+    // Inspect file magic bytes to determine real file type and reject non-binary/HTML error responses
+    const detectedType = detectFileType(tempDownloadPath);
+    const lowerTarget = (fileName || downloadUrl || "").toLowerCase();
+    const expectsExe = lowerTarget.endsWith(".exe") || (installerKind || "").toLowerCase() === "exe";
+    if (expectsExe && detectedType !== "exe") {
+      try { if (fs.existsSync(tempDownloadPath)) fs.unlinkSync(tempDownloadPath); } catch (_) {}
+      try { if (fs.existsSync(tempDownloadPath + ".part")) fs.unlinkSync(tempDownloadPath + ".part"); } catch (_) {}
+      try { if (fs.existsSync(tempDownloadPath + ".part.meta.json")) fs.unlinkSync(tempDownloadPath + ".part.meta.json"); } catch (_) {}
+      throw new Error("الملف المحمل ليس ملف تثبيت Windows صالح (.exe). قد يكون التحميل تالفاً بسبب الشبكة.");
+    }
+
+    let finalPackagePath = "";
+    if (detectedType === "exe") {
+      finalPackagePath = path.join(tempDir, "update-installer.exe");
+    } else if (detectedType === "msi") {
+      finalPackagePath = path.join(tempDir, "update-installer.msi");
+    } else if (detectedType === "zip") {
+      finalPackagePath = path.join(tempDir, "update-package.zip");
+    } else {
+      if (lowerTarget.includes(".msi")) {
+        finalPackagePath = path.join(tempDir, "update-installer.msi");
+      } else if (lowerTarget.includes(".zip")) {
+        finalPackagePath = path.join(tempDir, "update-package.zip");
+      } else {
+        finalPackagePath = path.join(tempDir, "update-installer.exe");
+      }
+    }
+
+    if (fs.existsSync(finalPackagePath)) {
+      try { fs.unlinkSync(finalPackagePath); } catch (_) {}
+    }
+    fs.renameSync(tempDownloadPath, finalPackagePath);
+    const finalStats = fs.statSync(finalPackagePath);
+
+    // Save update metadata for pre-launch integrity verification in updater:apply-update
+    const meta = {
+      packagePath: finalPackagePath,
+      packageType: detectedType,
+      fileName: fileName || path.basename(finalPackagePath),
+      downloadUrl: downloadUrl,
+      checksumSha256: effectiveChecksum || null,
+      expectedSize: finalStats.size,
+      silentInstallArgs: silentInstallArgs || "",
+      installerKind: installerKind || "",
+      previousVersion: app.getVersion(),
+      downloadedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(path.join(tempDir, "update-meta.json"), JSON.stringify(meta, null, 2), "utf8");
+    updaterHelpers.clearUpdateResult(tempDir);
 
     sendUpdaterProgress({
       status: "downloaded",
       progress: 100,
-      message: "تم تحميل التحديث بنجاح وجاهز للتثبيت.",
+      message: "تم تحميل التحديث بنجاح والتحقق من سلامته بالكامل.",
     }, { force: true });
 
-    return { success: true, zipPath: updateZipPath };
+    return { success: true, filePath: finalPackagePath, packageType: detectedType };
   } catch (error) {
     console.error("Update download failed:", error);
+    try { if (fs.existsSync(tempDownloadPath)) fs.unlinkSync(tempDownloadPath); } catch (_) {}
     if (mainWindow && !mainWindow.webContents.isDestroyed()) {
       mainWindow.webContents.send("updater-progress", {
         status: "failed",
@@ -3197,7 +5445,37 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
   }
 });
 
-ipcMain.handle("updater:apply-update", async () => {
+const updaterHelpers = require("./updater_helpers");
+
+ipcMain.handle("updater:get-prepared-update", async (_event, payload = {}) => {
+  const tempDir = path.join(app.getPath("temp"), APP_NAME);
+  if (!fs.existsSync(tempDir)) {
+    return { prepared: false, reason: "missing", lastInstallResult: null };
+  }
+  const check = await updaterHelpers.validatePreparedPackage({
+    tempDir,
+    checksumSha256: payload && payload.checksumSha256 ? String(payload.checksumSha256) : "",
+    fileName: payload && payload.fileName ? String(payload.fileName) : "",
+    version: payload && (payload.targetVersion || payload.version) ? String(payload.targetVersion || payload.version) : "",
+    detectFileType,
+    calculateFileSha256,
+    requireMatchForReuse: false,
+  });
+  return {
+    prepared: Boolean(check.prepared),
+    reason: check.reason || null,
+    filePath: check.packagePath || null,
+    packageType: check.packageType || null,
+    fileSize: check.fileSize || 0,
+    checksumSha256: check.checksumSha256 || null,
+    version: check.version || null,
+    fileName: check.fileName || null,
+    silentInstallArgs: check.silentInstallArgs || "",
+    lastInstallResult: check.lastInstallResult || null,
+  };
+});
+
+ipcMain.handle("updater:apply-update", async (event, payload = {}) => {
   const tempDir = path.join(app.getPath("temp"), APP_NAME);
   fs.mkdirSync(tempDir, { recursive: true });
   
@@ -3210,181 +5488,112 @@ ipcMain.handle("updater:apply-update", async () => {
 
   writeLog("=== Starting JS apply-update handler ===");
 
-  const updateZipPath = path.join(tempDir, "app-update.zip");
-  const extractedPath = path.join(tempDir, "extracted");
-  const appDir = path.dirname(process.execPath);
-  const exePath = process.execPath;
+  // Read metadata if available
+  let meta = updaterHelpers.readUpdateMeta(tempDir) || {};
+  const metaPath = path.join(tempDir, "update-meta.json");
 
-  writeLog(`Paths - tempDir: ${tempDir}, zip: ${updateZipPath}, appDir: ${appDir}, exe: ${exePath}`);
-
-  if (!fs.existsSync(updateZipPath)) {
-    writeLog("ERROR: update zip path does not exist!");
-    throw new Error("ملف التحديث غير موجود! يرجى تحميله أولاً.");
+  // Merge any runtime payload options
+  if (payload && typeof payload === "object") {
+    meta = { ...meta, ...payload };
   }
 
-  const zipPathNormalized = updateZipPath.replace(/\\/g, "/");
-  const extractedPathNormalized = extractedPath.replace(/\\/g, "/");
-  const appDirNormalized = appDir.replace(/\\/g, "/");
-  const exePathNormalized = exePath.replace(/\\/g, "/");
-  const logPathNormalized = path.join(tempDir, "update_log.txt").replace(/\\/g, "/");
+  const check = await updaterHelpers.validatePreparedPackage({
+    tempDir,
+    checksumSha256: meta.checksumSha256 || "",
+    fileName: meta.fileName || "",
+    version: meta.targetVersion || meta.version || "",
+    detectFileType,
+    calculateFileSha256,
+    requireMatchForReuse: false,
+  });
 
-  const psScriptPath = path.join(app.getPath("temp"), "apply_update.ps1");
-  const psScriptContent = `
-$logPath = "${logPathNormalized}"
-$zipPath = "${zipPathNormalized}"
-$extractedPath = "${extractedPathNormalized}"
-$appDir = "${appDirNormalized}"
-$exePath = "${exePathNormalized}"
-
-function Log-Msg($msg) {
-    $logParent = [System.IO.Path]::GetDirectoryName($logPath)
-    if (-not (Test-Path "$logParent")) {
-        New-Item -ItemType Directory -Path "$logParent" -Force | Out-Null
+  if (!check.prepared) {
+    if (check.reason === "missing") {
+      writeLog("ERROR: update package file does not exist in tempDir!");
+      throw new Error("ملف التحديث غير موجود! يرجى تحميله أولاً.");
     }
-    $timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    "[$timestamp] $msg" | Out-File -FilePath $logPath -Append -Encoding UTF8
-}
+    writeLog(`FATAL INTEGRITY ERROR (${check.reason}). Removing damaged package so updater can re-download cleanly.`);
+    try { if (check.packagePath && fs.existsSync(check.packagePath)) fs.unlinkSync(check.packagePath); } catch (_) {}
+    try { if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath); } catch (_) {}
+    updaterHelpers.clearUpdateResult(tempDir);
+    return {
+      success: false,
+      error: "ملف التحديث تالف أو غير مكتمل. تم حذفه بأمان لمنع خطأ NSIS، يرجى إعادة المحاولة.",
+    };
+  }
 
-Log-Msg "=== Starting update process ==="
-Log-Msg "Parent PID: ${process.pid}"
-Log-Msg "Zip Path: $zipPath"
-Log-Msg "Extraction path: $extractedPath"
-Log-Msg "App Dir: $appDir"
-Log-Msg "Exe Path: $exePath"
+  const packagePath = check.packagePath;
+  const detectedType = check.packageType;
+  const isExe = detectedType === "exe" || packagePath.toLowerCase().endsWith(".exe");
+  const isMsi = detectedType === "msi" || packagePath.toLowerCase().endsWith(".msi");
 
-# 1. Wait for parent process to exit
-Log-Msg "Waiting for parent process ${process.pid} to exit..."
-$parentPid = ${process.pid}
-while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) {
-    Start-Sleep -m 200
-}
-Log-Msg "Parent process has exited."
+  const appDir = path.dirname(process.execPath);
+  const exePath = process.execPath;
+  const procName = path.basename(exePath, path.extname(exePath));
+  const parentPid = process.pid;
 
-# 2. Force kill any remaining iSmart Messenger or Electron processes in the app directory to prevent file locks
-$procName = [System.IO.Path]::GetFileNameWithoutExtension($exePath)
-Log-Msg "Checking for other running instances of $procName..."
-$timeout = 50
-while ((Get-Process -Name $procName -ErrorAction SilentlyContinue) -and ($timeout -gt 0)) {
-    Log-Msg "Waiting for remaining child or auxiliary processes to exit..."
-    Start-Sleep -m 200
-    $timeout--
-}
+  writeLog(`Found update package: ${packagePath} (type: ${detectedType}, isExe: ${isExe}, isMsi: ${isMsi})`);
+  writeLog(`appDir: ${appDir}, exePath: ${exePath}, procName: ${procName}, PID: ${parentPid}`);
 
-if (Get-Process -Name $procName -ErrorAction SilentlyContinue) {
-    Log-Msg "Forcefully terminating remaining $procName processes..."
-    Stop-Process -Name $procName -Force -ErrorAction SilentlyContinue
-    Start-Sleep -s 1
-} else {
-    Log-Msg "All other instances of $procName have exited cleanly."
-}
+  const silentArgs = (meta.silentInstallArgs || (payload && payload.silentInstallArgs) || "/S").trim();
+  const targetVersion = String(meta.targetVersion || meta.version || "").trim();
+  const previousVersion = String(app.getVersion() || meta.previousVersion || "").trim();
+  const resultPath = path.join(tempDir, "update-result.json");
+  const psScriptPath = path.join(tempDir, "apply_update.ps1");
 
-# 3. Clear extraction folder
-if (Test-Path "$extractedPath") {
-    Log-Msg "Deleting old extracted folder..."
-    Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue
-}
-New-Item -ItemType Directory -Path "$extractedPath" -Force | Out-Null
+  try {
+    const updatedMeta = {
+      ...meta,
+      packagePath,
+      packageType: detectedType,
+      targetVersion: targetVersion || meta.targetVersion || null,
+      previousVersion: previousVersion || meta.previousVersion || null,
+      lastApplyStartedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(metaPath, JSON.stringify(updatedMeta, null, 2), "utf8");
+  } catch (_) {}
+  updaterHelpers.clearUpdateResult(tempDir);
 
-# 4. Extract Zip
-Log-Msg "Extracting update package..."
-try {
-    Add-Type -Assembly "System.IO.Compression.FileSystem"
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractedPath)
-    Log-Msg "Extraction completed successfully via .NET."
-} catch {
-    Log-Msg "Fallback to Shell COM extraction due to: $($_.Exception.Message)"
-    if (Test-Path "$extractedPath") {
-        Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    New-Item -ItemType Directory -Path "$extractedPath" -Force | Out-Null
-    
-    $shell = New-Object -ComObject Shell.Application
-    $zip = $shell.NameSpace("$zipPath")
-    $dest = $shell.NameSpace("$extractedPath")
-    $dest.CopyHere($zip.Items(), 0x14)
-    
-    function Get-FolderSize($p) {
-        $files = Get-ChildItem -Path $p -Recurse -ErrorAction SilentlyContinue
-        if ($files) { ($files | Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum } else { 0 }
-    }
-    
-    $lastSize = -1
-    $sameCount = 0
-    while ($sameCount -lt 3) {
-        $currentSize = Get-FolderSize "$extractedPath"
-        Log-Msg "Current extracted size: $currentSize bytes"
-        if ($currentSize -eq $lastSize -and $currentSize -gt 0) {
-            $sameCount++
-        } else {
-            $lastSize = $currentSize
-            $sameCount = 0
-        }
-        Start-Sleep -m 500
-    }
-    Log-Msg "Shell COM extraction completed."
-}
-
-Start-Sleep -s 1
-
-# 5. Copy files with Retry Loop (up to 5 retries)
-Log-Msg "Copying files to $appDir..."
-$copied = $false
-for ($i = 1; $i -le 5; $i++) {
-    try {
-        Copy-Item -Path "$extractedPath/app/*" -Destination "$appDir" -Recurse -Force -ErrorAction Stop
-        $copied = $true
-        Log-Msg "Files copied successfully on attempt $i."
-        break
-    } catch {
-        Log-Msg "Attempt $i to copy files failed: $($_.Exception.Message). Retrying in 1 second..."
-        if (Get-Process -Name $procName -ErrorAction SilentlyContinue) {
-            Stop-Process -Name $procName -Force -ErrorAction SilentlyContinue
-        }
-        Start-Sleep -s 1
-    }
-}
-
-if (-not $copied) {
-    Log-Msg "CRITICAL ERROR: Failed to copy files after 5 attempts."
-    Log-Msg "Relaunching app anyway..."
-    Start-Process "$exePath"
-    exit 1
-}
-
-# 6. Relaunch app
-Log-Msg "Relaunching application..."
-try {
-    Start-Process "$exePath"
-    Log-Msg "Application relaunched successfully."
-} catch {
-    Log-Msg "ERROR: Could not relaunch application: $($_.Exception.Message)"
-}
-
-# 7. Cleanup
-Log-Msg "Cleaning up update artifacts..."
-Remove-Item -Path "$zipPath" -Force -ErrorAction SilentlyContinue
-Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue
-Log-Msg "=== Update process completed successfully ==="
-
-# Self-destruct script
-Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
-`.trim();
+  const psScriptContent = updaterHelpers.buildApplyUpdatePsScript({
+    packageType: isExe ? "exe" : isMsi ? "msi" : "zip",
+    packagePath,
+    appDir,
+    exePath,
+    procName,
+    parentPid,
+    logPath: path.join(tempDir, "update_log.txt"),
+    metaPath,
+    resultPath,
+    silentArgs,
+    targetVersion,
+    previousVersion,
+    tempDir,
+  });
+  writeLog(`Generated PowerShell updater script (type=${isExe ? "exe" : isMsi ? "msi" : "zip"}, target=${targetVersion || "unknown"}).`);
 
   writeLog(`Writing psScriptPath: ${psScriptPath}...`);
   fs.writeFileSync(psScriptPath, psScriptContent, "utf8");
   writeLog("psScriptPath written successfully.");
 
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+    try {
+      if (typeof mainWindow.webContents.session.flushStorageData === "function") {
+        await Promise.race([
+          Promise.resolve(mainWindow.webContents.session.flushStorageData()),
+          new Promise((resolve) => setTimeout(resolve, 600)),
+        ]);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    } catch (_) {}
+  }
+
   const { spawn } = require("child_process");
+  const psExecutable = updaterHelpers.resolvePowerShellExecutable();
   try {
-    writeLog("Spawning powershell.exe via cmd.exe start command...");
+    writeLog(`Spawning PowerShell updater directly (${psExecutable})...`);
     const child = spawn(
-      "cmd.exe",
+      psExecutable,
       [
-        "/c",
-        "start",
-        "",
-        "/min",
-        "powershell.exe",
         "-NoProfile",
         "-ExecutionPolicy",
         "Bypass",
@@ -3399,22 +5608,47 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyConti
         windowsHide: true,
       }
     );
-    writeLog(`cmd.exe child process spawned successfully (PID: ${child.pid}).`);
-    
-    child.on("error", (err) => {
-      writeLog(`ERROR: Child process error event: ${err.message}`);
+    if (!child || !child.pid) {
+      throw new Error("PowerShell process failed to start (no PID).");
+    }
+    child.on("error", (spawnErr) => {
+      writeLog(`WARNING: PowerShell child error event: ${spawnErr.message}`);
     });
+    writeLog(`PowerShell updater process spawned successfully (PID: ${child.pid}).`);
     child.unref();
   } catch (err) {
-    writeLog(`ERROR: Exception spawning child process: ${err.message}`);
+    writeLog(`ERROR: Exception spawning updater process: ${err.message}`);
+    return {
+      success: false,
+      error: `تعذر بدء برنامج التثبيت تلقائياً: ${err.message}`,
+    };
   }
 
-  writeLog("Waiting 1.5 seconds to ensure script start before quitting...");
+  writeLog("Quitting application so installer can proceed...");
   setTimeout(() => {
-    writeLog("Quitting application...");
+    writeLog("Quitting Electron app now...");
     isQuitting = true;
+    try {
+      if (webAppServer && typeof webAppServer.closeAllConnections === "function") {
+        webAppServer.closeAllConnections();
+      }
+    } catch (_) {}
+    try {
+      if (lanServer && typeof lanServer.closeAllConnections === "function") {
+        lanServer.closeAllConnections();
+      }
+    } catch (_) {}
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try { mainWindow.destroy(); } catch (_) {}
+    }
     app.quit();
-  }, 1500);
+    const forceExitTimer = setTimeout(() => {
+      try { app.exit(0); } catch (_) {}
+    }, 600);
+    if (typeof forceExitTimer.unref === "function") {
+      forceExitTimer.unref();
+    }
+  }, 300);
 
   return { success: true };
 });
@@ -3423,6 +5657,7 @@ app.whenReady().then(async () => {
   app.setAppUserModelId("com.ismart.messenger.webwrapper");
   Menu.setApplicationMenu(null);
   ensureStartup(true);
+  cleanLegacyInstallation();
   const locale = app.getLocale();
   const startUrl = await startWebAppServer();
   const localizedUrl = `${startUrl}?lang=${locale}`;
@@ -3433,6 +5668,10 @@ app.whenReady().then(async () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
+
+  destroyAudioWorker("Application quitting.");
+  try { _httpAgentKeepAlive.destroy(); } catch (_) {}
+  try { _httpsAgentNoVerify.destroy(); } catch (_) {}
 
   // Cleanup window resources without clearing Chromium storage/cache.
   if (mainWindow) {

@@ -15,6 +15,7 @@ const {
   listManagedUpdateJobs,
   getManagedUpdateJob,
   cancelManagedUpdateJob,
+  cancelAllManagedUpdates,
 } = require("./update.controller");
 
 const router = express.Router();
@@ -75,6 +76,8 @@ router.post(
     body("targetArchitecture").optional().isString(),
     body("minWindowsBuild").optional().isString(),
     body("rolloutPercentage").optional().isInt({ min: 1, max: 100 }),
+    body("targetType").optional().isIn(["all", "branch", "job_only"]),
+    body("targetBranches").optional(),
     body("checksumSha256").optional().isString(),
     body("externalDownloadUrl").optional().isString(),
   ],
@@ -99,6 +102,8 @@ router.patch(
     body("targetArchitecture").optional().isString(),
     body("minWindowsBuild").optional().isString(),
     body("rolloutPercentage").optional().isInt({ min: 1, max: 100 }),
+    body("targetType").optional().isIn(["all", "branch", "job_only"]),
+    body("targetBranches").optional(),
   ],
   validateRequest,
   patchManagedRelease
@@ -154,5 +159,7 @@ router.post(
   validateRequest,
   cancelManagedUpdateJob
 );
+
+router.post("/stop-all", cancelAllManagedUpdates);
 
 module.exports = router;

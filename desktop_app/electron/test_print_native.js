@@ -387,6 +387,21 @@ async function runTests() {
   await p6;
   console.log("Assertion passed: Content-Type: text/html + %PDF- signature => Native PDF print.");
 
+  // Case D: Base64 Image print => HTML print wrapper
+  execFileCalled = 0;
+  htmlPrintCalled = 0;
+  const pngB64Data = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]).toString("base64");
+  const p7 = await ipcHandlers["print:base64"](null, {
+    base64: pngB64Data,
+    fileName: "image.png",
+    mimeType: "image/png",
+    jobId: "img-job-1"
+  });
+  assert.strictEqual(htmlPrintCalled, 1, "htmlPrint calls must be 1 for Image");
+  assert.strictEqual(execFileCalled, 0, "nativePdfPrint calls must be 0 for Image");
+  assert.strictEqual(p7.success, true);
+  console.log("Assertion passed: Base64 PNG image uses HTML print wrapper.");
+
   console.log("All Electron native print unit tests passed successfully!");
 }
 

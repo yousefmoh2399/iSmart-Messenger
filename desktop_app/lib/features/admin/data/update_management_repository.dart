@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
-import 'package:path_provider/path_provider.dart';
+import '../../../../core/utils/app_path_utils.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../auth/data/auth_repository.dart';
@@ -96,6 +96,8 @@ class UpdateManagementRepository {
     String? minWindowsBuild,
     int rolloutPercentage = 100,
     String silentInstallArgs = '',
+    String targetType = 'job_only',
+    List<String> targetBranches = const [],
     String? externalDownloadUrl,
     String? artifactFilePath,
     Uint8List? artifactBytes,
@@ -105,6 +107,22 @@ class UpdateManagementRepository {
     final resolvedArtifactName = artifactFileName?.trim().isNotEmpty == true
         ? artifactFileName!.trim()
         : (artifactFilePath == null ? null : path.basename(artifactFilePath));
+    final isExeOrMsi = resolvedArtifactName != null &&
+        (resolvedArtifactName.toLowerCase().endsWith('.exe') ||
+            resolvedArtifactName.toLowerCase().endsWith('.msi'));
+    final effectivePackageLayout =
+        isExeOrMsi ? 'installer' : packageLayout.trim();
+    final effectiveInstallerKind = resolvedArtifactName != null &&
+            resolvedArtifactName.toLowerCase().endsWith('.exe')
+        ? 'exe'
+        : (resolvedArtifactName != null &&
+                resolvedArtifactName.toLowerCase().endsWith('.msi')
+            ? 'msi'
+            : (resolvedArtifactName != null &&
+                    resolvedArtifactName.toLowerCase().endsWith('.apk')
+                ? 'apk'
+                : 'zip'));
+
     final formData = FormData.fromMap({
       'version': version.trim(),
       if (buildNumber != null && buildNumber.trim().isNotEmpty)
@@ -114,8 +132,9 @@ class UpdateManagementRepository {
       'notes': notes.trim(),
       'mandatory': mandatory,
       'isEnabled': isEnabled,
+      'installerKind': effectiveInstallerKind,
       'packageType': packageType.trim(),
-      'packageLayout': packageLayout.trim(),
+      'packageLayout': effectivePackageLayout,
       'entryExecutable': entryExecutable.trim(),
       if (minSupportedVersion != null && minSupportedVersion.trim().isNotEmpty)
         'minSupportedVersion': minSupportedVersion.trim(),
@@ -124,6 +143,8 @@ class UpdateManagementRepository {
         'minWindowsBuild': minWindowsBuild.trim(),
       'rolloutPercentage': rolloutPercentage,
       'silentInstallArgs': silentInstallArgs.trim(),
+      'targetType': targetType.trim(),
+      if (targetBranches.isNotEmpty) 'targetBranches': targetBranches,
       if (externalDownloadUrl != null && externalDownloadUrl.trim().isNotEmpty)
         'externalDownloadUrl': externalDownloadUrl.trim(),
       if (artifactBytes != null && resolvedArtifactName != null)
@@ -165,6 +186,8 @@ class UpdateManagementRepository {
     String? targetArchitecture,
     String? minWindowsBuild,
     int? rolloutPercentage,
+    String? targetType,
+    List<String>? targetBranches,
   }) async {
     final response = await _apiClient.dio.patch<Map<String, dynamic>>(
       '/api/admin/updates/releases/$releaseId',
@@ -184,6 +207,8 @@ class UpdateManagementRepository {
           'targetArchitecture': targetArchitecture,
         if (minWindowsBuild != null) 'minWindowsBuild': minWindowsBuild,
         if (rolloutPercentage != null) 'rolloutPercentage': rolloutPercentage,
+        if (targetType != null) 'targetType': targetType,
+        if (targetBranches != null) 'targetBranches': targetBranches,
       },
     );
     final payload = _extractData(response.data);
@@ -255,6 +280,7 @@ class UpdateManagementRepository {
     required String connectionStatus,
     required bool autoUpdateEnabled,
     required bool silentInstallEnabled,
+    String platform = 'desktop_windows',
   }) async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/updates/devices/heartbeat',
@@ -266,6 +292,7 @@ class UpdateManagementRepository {
           'localIp': localIp.trim(),
         'branchCode': branchCode,
         'channel': channel,
+        'platform': platform,
         'appVersion': appVersion,
         'osName': osName,
         'osVersion': osVersion,
@@ -338,7 +365,7 @@ class UpdateManagementRepository {
     String? downloadUrl,
     String? destinationDirectory,
     void Function(int received, int total)? onReceiveProgress,
-    int maxAttempts = 3,
+    int maxAttempts = 6,
   }) async {
     final directory = destinationDirectory == null
         ? await _defaultArtifactDirectory()
@@ -362,7 +389,8 @@ class UpdateManagementRepository {
         final existingBytes = await _existingFileLength(partialDestination);
         client = HttpClient()
           ..connectionTimeout = const Duration(minutes: 5)
-          ..idleTimeout = const Duration(minutes: 5);
+          ..idleTimeout = const Duration(minutes: 5)
+          ..badCertificateCallback = (cert, host, port) => true;
         final request = await client
             .getUrl(targetUri)
             .timeout(const Duration(minutes: 5));
@@ -374,7 +402,7 @@ class UpdateManagementRepository {
         }
 
         final response = await request.close().timeout(
-          const Duration(minutes: 10),
+          const Duration(minutes: 45),
         );
         if (response.statusCode == HttpStatus.requestedRangeNotSatisfiable &&
             existingBytes > 0) {
@@ -399,9 +427,28 @@ class UpdateManagementRepository {
           );
         }
 
-        final canAppend =
+        var canAppend =
             existingBytes > 0 &&
             response.statusCode == HttpStatus.partialContent;
+        if (canAppend) {
+          final contentRange =
+              response.headers.value(HttpHeaders.contentRangeHeader) ?? '';
+          final rangeMatch = RegExp(
+            r'^bytes\s+(\d+)-',
+            caseSensitive: false,
+          ).firstMatch(contentRange.trim());
+          final rangeStart = int.tryParse(rangeMatch?.group(1) ?? '');
+          if (rangeStart == null || rangeStart != existingBytes) {
+            final partialFile = File(partialDestination);
+            if (partialFile.existsSync()) {
+              await partialFile.delete();
+            }
+            throw HttpException(
+              'Range start offset mismatch (expected $existingBytes, got $rangeStart).',
+              uri: targetUri,
+            );
+          }
+        }
         final partialFile = File(partialDestination);
         sink = await partialFile.open(
           mode: canAppend ? FileMode.append : FileMode.write,
@@ -425,6 +472,23 @@ class UpdateManagementRepository {
         await sink.close();
         sink = null;
 
+        final actualSize = await partialFile.length();
+        if (actualSize <= 0) {
+          if (partialFile.existsSync()) {
+            await partialFile.delete();
+          }
+          throw HttpException('Downloaded file is empty (0 bytes)', uri: targetUri);
+        }
+        if (totalBytes > 0 && actualSize != totalBytes) {
+          if (actualSize > totalBytes && partialFile.existsSync()) {
+            await partialFile.delete();
+          }
+          throw HttpException(
+            'Incomplete or corrupted download: got $actualSize bytes, expected $totalBytes bytes',
+            uri: targetUri,
+          );
+        }
+
         final finalFile = File(destination);
         if (finalFile.existsSync()) {
           await finalFile.delete();
@@ -447,17 +511,23 @@ class UpdateManagementRepository {
   }
 
   Future<Directory> _defaultArtifactDirectory() async {
-    final tempDir = await getTemporaryDirectory();
+    final tempDir = await AppPathUtils.getSafeTemporaryDirectory();
     return Directory(path.join(tempDir.path, 'update-artifacts'));
   }
 
   Uri _resolveDownloadUri(String target) {
     final trimmed = target.trim();
     final asUri = Uri.parse(trimmed);
+    final baseUri = Uri.parse(baseUrl);
     if (asUri.hasScheme) {
+      if (asUri.path.startsWith('/api/')) {
+        return baseUri.replace(
+          path: asUri.path,
+          query: asUri.hasQuery ? asUri.query : null,
+        );
+      }
       return asUri;
     }
-    final baseUri = Uri.parse(baseUrl);
     return baseUri.resolve(trimmed);
   }
 
@@ -485,6 +555,10 @@ class UpdateManagementRepository {
     if (length > 0) {
       return initialBytes + length;
     }
-    return initialBytes;
+    final xFileSize = int.tryParse(response.headers.value('x-file-size') ?? '');
+    if (xFileSize != null && xFileSize > 0) {
+      return xFileSize;
+    }
+    return 0;
   }
 }

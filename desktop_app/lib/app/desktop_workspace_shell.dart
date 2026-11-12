@@ -1,6 +1,9 @@
+import '../features/workspace/presentation/workspace_home_screen.dart';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../features/chat/models/chat_models.dart';
 import '../features/chat/presentation/chat_dashboard_screen.dart';
 import '../features/files/presentation/files_dashboard_screen.dart';
 import '../features/profile/presentation/profile_screen.dart';
@@ -11,6 +14,7 @@ import '../features/purchasing/presentation/screens/purchase_requests_screen.dar
 import '../features/snipeit/presentation/snipeit_screen.dart';
 import '../features/admin/presentation/system_monitor_screen.dart';
 import '../shared/providers/providers.dart';
+import '../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../shared/widgets/desktop_workspace_sidebar.dart';
 
 class DesktopWorkspaceShell extends ConsumerStatefulWidget {
@@ -22,6 +26,108 @@ class DesktopWorkspaceShell extends ConsumerStatefulWidget {
 }
 
 class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
+  StreamSubscription? _updateEventsSub;
+  final Set<int> _mountedTabIndices = <int>{0};
+  int? _lastTaskbarBadgeCount;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initUpdateListener();
+      final initialUnread =
+          ref.read(chatOverviewControllerProvider).valueOrNull?.totalUnread ?? 0;
+      _lastTaskbarBadgeCount = initialUnread;
+      unawaited(web_bridge.setTaskbarBadgeCount(initialUnread));
+    });
+  }
+
+  @override
+  void dispose() {
+    _updateEventsSub?.cancel();
+    _lastTaskbarBadgeCount = 0;
+    unawaited(web_bridge.setTaskbarBadgeCount(0));
+    super.dispose();
+  }
+
+  void _initUpdateListener() {
+    try {
+      final agent = ref.read(desktopUpdateAgentProvider);
+      _updateEventsSub = agent.events.listen((event) {
+        if (!mounted) return;
+        if (event.type == 'ready_to_restart') {
+          _showUpdateReadyDialog(event.message);
+        }
+      });
+      // Check initial state
+      agent.hasPreparedUpdate();
+    } catch (_) {}
+  }
+
+  Future<void> _showUpdateReadyDialog(String message) async {
+    if (!mounted) return;
+    final agent = ref.read(desktopUpdateAgentProvider);
+
+    final action = await showDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.check_circle_rounded,
+                  color: Color(0xFF10B981),
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'اكتمل تنزيل التحديث',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          content: Text(
+            message.isNotEmpty
+                ? message
+                : 'تم تنزيل حزمة التحديث بنجاح وهي جاهزة للتثبيت.\nهل ترغب في تثبيت التحديث وإعادة تشغيل التطبيق الآن أم المتابعة لاحقاً؟',
+            style: const TextStyle(fontSize: 14, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop('later'),
+              child: const Text('لاحقاً (متابعة العمل)'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(ctx).pop('now'),
+              icon: const Icon(Icons.restart_alt_rounded, size: 18),
+              label: const Text('تثبيت الآن'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (action == 'now') {
+      try {
+        await agent.restartToApplyPreparedUpdate();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('فشل بدء التثبيت: $e'), backgroundColor: Colors.red),
+          );
+        }
+      }
+    }
+  }
 
 
   // Getter to read the global active section
@@ -36,7 +142,11 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
       return;
     }
     ref.read(activeSectionProvider.notifier).state = section;
-    ref.read(chatSectionVisibleProvider.notifier).state = section == DesktopWorkspaceSection.chat;
+    final isChat = section == DesktopWorkspaceSection.chat;
+    ref.read(chatSectionVisibleProvider.notifier).state = isChat;
+    if (!isChat) {
+      ref.read(activeConversationIdProvider.notifier).state = null;
+    }
   }
 
 
@@ -62,6 +172,8 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
         return 6;
       case DesktopWorkspaceSection.systemMonitor:
         return 7;
+      case DesktopWorkspaceSection.workspace:
+        return 8;
     }
   }
 
@@ -92,6 +204,18 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<AsyncValue<ChatOverviewData>>(
+      chatOverviewControllerProvider,
+      (previous, next) {
+        final unread = next.valueOrNull?.totalUnread ?? 0;
+        if (_lastTaskbarBadgeCount == unread) {
+          return;
+        }
+        _lastTaskbarBadgeCount = unread;
+        unawaited(web_bridge.setTaskbarBadgeCount(unread));
+      },
+    );
+
     final auth = ref.watch(authControllerProvider);
     final themeMode =
         ref.watch(themeModeControllerProvider).valueOrNull ?? ThemeMode.light;
@@ -123,25 +247,50 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
           });
         }
 
+        final activeIndex = _stackIndexForSection(_activeSection);
+        _mountedTabIndices.add(activeIndex);
+
         return Scaffold(
           body: Row(
             children: [
               Expanded(
                 child: IndexedStack(
-                  index: _stackIndexForSection(_activeSection),
+                  index: activeIndex,
                   children: [
-                    ChatDashboardScreen(
-                      isWrapped: true,
-                      activeSection: _activeSection,
-                      onSectionChanged: _navigateTo,
-                    ),
-                    const FilesDashboardScreen(isWrapped: true),
-                    const ServersScreen(isWrapped: true),
-                    const ProfileScreen(isWrapped: true),
-                    const PrinterMonitoringScreen(isWrapped: true),
-                    const PurchaseRequestsScreen(),
-                    const SnipeitScreen(isWrapped: true),
-                    const SystemMonitorScreen(isWrapped: true),
+                    _mountedTabIndices.contains(0)
+                        ? ChatDashboardScreen(
+                            isWrapped: true,
+                            activeSection: _activeSection,
+                            onSectionChanged: _navigateTo,
+                          )
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(1)
+                        ? const FilesDashboardScreen(isWrapped: true)
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(2)
+                        ? ServersScreen(
+                            isWrapped: true,
+                            isVisible: activeIndex == 2,
+                          )
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(3)
+                        ? const ProfileScreen(isWrapped: true)
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(4)
+                        ? const PrinterMonitoringScreen(isWrapped: true)
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(5)
+                        ? const PurchaseRequestsScreen()
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(6)
+                        ? const SnipeitScreen(isWrapped: true)
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(7)
+                        ? const SystemMonitorScreen(isWrapped: true)
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(8)
+                        ? const WorkspaceHomeScreen(isWrapped: true)
+                        : const SizedBox.shrink(),
                   ],
                 ),
               ),
@@ -151,10 +300,13 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
                 currentThemeMode: themeMode,
                 isDark: isDark,
                 accentColor: Theme.of(context).colorScheme.primary,
+                hasPulsingUpdate: ref.watch(desktopUpdateAgentProvider).hasPreparedUpdateNotifier.value,
                 onOpenChat: () => _navigateTo(DesktopWorkspaceSection.chat),
                 onRefresh: () =>
                     ref.read(chatOverviewControllerProvider.notifier).refresh(),
                 onOpenFiles: () => _navigateTo(DesktopWorkspaceSection.files),
+                onOpenWorkspace: () =>
+                    _navigateTo(DesktopWorkspaceSection.workspace),
                 showServersShortcut: showServersShortcut,
                 onOpenServers: () =>
                     _navigateTo(DesktopWorkspaceSection.servers),

@@ -564,14 +564,13 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
   }
 
   Future<void> _printDocument(RemoteDocument document) async {
+    if (!mounted) return;
     try {
       final prefs = ref.read(userPreferencesControllerProvider).valueOrNull;
-      final bytes = await ref
-          .read(documentRepositoryProvider)
-          .fetchDocumentBytes(document);
-      final result = await ref
-          .read(desktopPrintServiceProvider)
-          .executePrintJob({
+      final docRepository = ref.read(documentRepositoryProvider);
+      final printService = ref.read(desktopPrintServiceProvider);
+      final bytes = await docRepository.fetchDocumentBytes(document);
+      final result = await printService.executePrintJob({
             'fileName': document.fileName,
             'mimeType': 'application/pdf',
             'inlineFileBase64': base64Encode(bytes),
@@ -611,12 +610,12 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
         ],
       ),
     );
-    if (result == null || result.isEmpty) return;
+    if (result == null || result.isEmpty || !mounted) return;
     try {
-      await ref
-          .read(documentRepositoryProvider)
-          .renameDocument(document.id, result);
-      await ref.read(documentsControllerProvider.notifier).refresh();
+      final docRepository = ref.read(documentRepositoryProvider);
+      final docsController = ref.read(documentsControllerProvider.notifier);
+      await docRepository.renameDocument(document.id, result);
+      await docsController.refresh();
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -645,10 +644,12 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
           ),
         ) ??
         false;
-    if (!shouldDelete) return;
+    if (!shouldDelete || !mounted) return;
     try {
-      await ref.read(documentRepositoryProvider).deleteDocument(document.id);
-      await ref.read(documentsControllerProvider.notifier).refresh();
+      final docRepository = ref.read(documentRepositoryProvider);
+      final docsController = ref.read(documentsControllerProvider.notifier);
+      await docRepository.deleteDocument(document.id);
+      await docsController.refresh();
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -1784,7 +1785,6 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
         false;
 
     return Scaffold(
-      floatingActionButton: FloatingActionButton.extended(onPressed: _createFolder, icon: const Icon(Icons.create_new_folder), label: const Text('إنشاء مجلد')),
       body: SafeArea(
         child: Row(
           children: [
@@ -1795,8 +1795,31 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
                   Positioned.fill(
                     child: documentsState.when(
                       loading: () => const _FilesDashboardLoading(),
-                      error: (error, _) =>
-                          Center(child: Text(error.toString())),
+                      error: (error, _) => Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.folder_off_outlined,
+                              size: 48,
+                              color: Theme.of(context).colorScheme.outline,
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'تعذر تحميل الملفات',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 12),
+                            FilledButton.tonalIcon(
+                              onPressed: () => ref
+                                  .read(documentsControllerProvider.notifier)
+                                  .refresh(),
+                              icon: const Icon(Icons.refresh_rounded),
+                              label: const Text('إعادة المحاولة'),
+                            ),
+                          ],
+                        ),
+                      ),
                       data: (documents) {
                         final documentFolders = ref.watch(documentFoldersProvider);
                         final folders = documentFolders.valueOrNull ?? [];
@@ -1898,6 +1921,11 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
                                       _SideNav(
                                         user: user,
                                         isAdmin: isAdmin,
+                                        folders: folders,
+                                        currentFolderId: _currentFolderId,
+                                        totalFilesCount: documents.length,
+                                        onFolderTap: (id) => setState(() => _currentFolderId = id),
+                                        onCreateFolder: _createFolder,
                                         onSendFileToMobile: user == null
                                             ? null
                                             : () => _sendFileToMobile(user),
@@ -1951,9 +1979,9 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
                                             onPrintDocument: _printDocument,
                                             onRenameDocument: _renameDocument,
                                             onDeleteDocument: _deleteDocument,
-
                                             folders: visibleFolders,
                                             currentFolderId: _currentFolderId,
+                                            currentFolderName: folders.where((f) => f.id == _currentFolderId).firstOrNull?.name,
                                             isGridView: _isGridView,
                                             onRemoveFromFolder: _removeDocumentFromFolder,
                                             onMoveToFolder: _showMoveFolderPicker,
@@ -1962,6 +1990,7 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
                                             onGoBack: _goBack,
                                             onFolderTap: (id) => setState(() => _currentFolderId = id),
                                             onViewChanged: (v) => setState(() => _isGridView = v),
+                                            onCreateFolder: _createFolder,
                                           ),
                                         ),
                                       ),
@@ -2211,10 +2240,116 @@ class _TransferPolicyEditorState extends State<_TransferPolicyEditor> {
   }
 }
 
+class _FileTypeInfo {
+  final IconData icon;
+  final Color color;
+  final String label;
+
+  const _FileTypeInfo({required this.icon, required this.color, required this.label});
+}
+
+_FileTypeInfo _getFileTypeInfo(String fileName) {
+  final ext = p.extension(fileName).toLowerCase().replaceAll('.', '');
+  switch (ext) {
+    case 'pdf':
+      return const _FileTypeInfo(
+        icon: Icons.picture_as_pdf_rounded,
+        color: Color(0xFFFF3B30), // Apple Red
+        label: 'PDF',
+      );
+    case 'doc':
+    case 'docx':
+    case 'rtf':
+      return const _FileTypeInfo(
+        icon: Icons.description_rounded,
+        color: Color(0xFF007AFF), // Apple Blue
+        label: 'DOC',
+      );
+    case 'xls':
+    case 'xlsx':
+    case 'csv':
+      return const _FileTypeInfo(
+        icon: Icons.table_chart_rounded,
+        color: Color(0xFF34C759), // Apple Green
+        label: 'XLS',
+      );
+    case 'ppt':
+    case 'pptx':
+      return const _FileTypeInfo(
+        icon: Icons.slideshow_rounded,
+        color: Color(0xFFFF9500), // Apple Orange
+        label: 'PPT',
+      );
+    case 'jpg':
+    case 'jpeg':
+    case 'png':
+    case 'gif':
+    case 'webp':
+    case 'svg':
+      return const _FileTypeInfo(
+        icon: Icons.image_rounded,
+        color: Color(0xFFAF52DE), // Apple Purple
+        label: 'IMG',
+      );
+    case 'mp4':
+    case 'mov':
+    case 'avi':
+    case 'mkv':
+    case 'wmv':
+      return const _FileTypeInfo(
+        icon: Icons.movie_rounded,
+        color: Color(0xFF5856D6), // Apple Indigo
+        label: 'VIDEO',
+      );
+    case 'mp3':
+    case 'wav':
+    case 'm4a':
+    case 'ogg':
+    case 'aac':
+      return const _FileTypeInfo(
+        icon: Icons.music_note_rounded,
+        color: Color(0xFFFF2D55), // Apple Pink
+        label: 'AUDIO',
+      );
+    case 'zip':
+    case 'rar':
+    case '7z':
+    case 'tar':
+    case 'gz':
+      return const _FileTypeInfo(
+        icon: Icons.folder_zip_rounded,
+        color: Color(0xFFFF9500), // Apple Amber
+        label: 'ZIP',
+      );
+    case 'txt':
+    case 'log':
+    case 'json':
+    case 'xml':
+    case 'yaml':
+    case 'yml':
+      return const _FileTypeInfo(
+        icon: Icons.article_rounded,
+        color: Color(0xFF64748B), // Apple Slate
+        label: 'TXT',
+      );
+    default:
+      return const _FileTypeInfo(
+        icon: Icons.insert_drive_file_rounded,
+        color: Color(0xFF007AFF),
+        label: 'FILE',
+      );
+  }
+}
+
 class _SideNav extends StatelessWidget {
   const _SideNav({
     required this.user,
     required this.isAdmin,
+    required this.folders,
+    required this.currentFolderId,
+    required this.totalFilesCount,
+    required this.onFolderTap,
+    required this.onCreateFolder,
     required this.onSendFileToMobile,
     required this.onSendFileToLanDesktop,
     required this.onOpenTransferCenter,
@@ -2228,6 +2363,11 @@ class _SideNav extends StatelessWidget {
 
   final AppUser? user;
   final bool isAdmin;
+  final List<DocumentFolder> folders;
+  final String? currentFolderId;
+  final int totalFilesCount;
+  final void Function(String?) onFolderTap;
+  final VoidCallback onCreateFolder;
   final VoidCallback? onSendFileToMobile;
   final VoidCallback? onSendFileToLanDesktop;
   final VoidCallback onOpenTransferCenter;
@@ -2240,102 +2380,400 @@ class _SideNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final bg = isDark ? const Color(0xFF161618) : const Color(0xFFF9F9FB);
 
     return Container(
-      width: 252,
-      color: cs.surface,
+      width: 250,
+      decoration: BoxDecoration(
+        color: bg,
+        border: Border(
+          left: BorderSide(
+            color: theme.dividerColor.withValues(alpha: 0.15),
+            width: 0.5,
+          ),
+        ),
+      ),
       child: LayoutBuilder(
         builder: (context, constraints) {
           return SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(14, 18, 14, 16),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
             child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              constraints: BoxConstraints(minHeight: constraints.maxHeight - 32),
               child: IntrinsicHeight(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _BrandHeader(userName: user?.fullName ?? ''),
-                    const SizedBox(height: 16),
-                    const Divider(height: 1),
-                    const SizedBox(height: 16),
-                    _NavTile(
-                      icon: Icons.folder_copy_outlined,
-                      label: 'الملفات',
-                      selected: true,
-                      onTap: () {},
+                    // Brand / User info
+                    Row(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: cs.primary.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            Icons.folder_shared_rounded,
+                            color: cs.primary,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'إدارة الملفات',
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              Text(
+                                user?.fullName.isNotEmpty == true
+                                    ? user!.fullName
+                                    : 'المستندات والطباعة',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                    const Spacer(),
-                    const Divider(height: 1),
-                    const SizedBox(height: 6),
-                    FilledButton.icon(
-                      onPressed: onSendFileToMobile,
-                      icon: sendingToMobile
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: ButtonLoadingIndicator(),
-                            )
-                          : const Icon(Icons.phone_android_rounded),
-                      label: Text(
-                        sendingToMobile
-                            ? 'جارٍ الإرسال...'
-                            : 'إرسال ملف للموبايل',
+                    const SizedBox(height: 18),
+
+                    // Library Section
+                    _SidebarSectionHeader(title: 'المكتبة'),
+                    const SizedBox(height: 4),
+                    _SidebarItemTile(
+                      icon: Icons.grid_view_rounded,
+                      label: 'جميع الملفات',
+                      countBadge: '$totalFilesCount',
+                      selected: currentFolderId == null,
+                      onTap: () => onFolderTap(null),
+                    ),
+
+                    // Folders List
+                    if (folders.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      _SidebarSectionHeader(
+                        title: 'المجلدات (${folders.length})',
+                        actionIcon: Icons.add_rounded,
+                        onActionTap: onCreateFolder,
                       ),
+                      const SizedBox(height: 4),
+                      ...folders.take(6).map((folder) {
+                        final isSelected = currentFolderId == folder.id;
+                        final fColor = folder.colorValue != null
+                            ? Color(folder.colorValue!)
+                            : const Color(0xFFFF9500);
+                        return _SidebarItemTile(
+                          icon: Icons.folder_rounded,
+                          iconColor: fColor,
+                          label: folder.name,
+                          countBadge: '${folder.documentIds.length}',
+                          selected: isSelected,
+                          onTap: () => onFolderTap(folder.id),
+                        );
+                      }),
+                      if (folders.length > 6)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 12, top: 4),
+                          child: Text(
+                            '+ ${folders.length - 6} مجلدات أخرى',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: cs.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                    ],
+
+                    const SizedBox(height: 16),
+                    Divider(
+                      height: 1,
+                      thickness: 0.5,
+                      color: theme.dividerColor.withValues(alpha: 0.15),
                     ),
-                    const SizedBox(height: 6),
-                    OutlinedButton.icon(
-                      onPressed:
-                          (preparingLanDesktopSend || sendingToLanDesktop)
+                    const SizedBox(height: 14),
+
+                    // Network & Transfers
+                    _SidebarSectionHeader(title: 'النقل والشبكة'),
+                    const SizedBox(height: 4),
+                    _SidebarItemTile(
+                      icon: Icons.phone_iphone_rounded,
+                      label: 'إرسال للهاتف',
+                      isLoading: sendingToMobile,
+                      onTap: sendingToMobile ? null : onSendFileToMobile,
+                    ),
+                    _SidebarItemTile(
+                      icon: Icons.lan_rounded,
+                      label: 'إرسال لجهاز محلي',
+                      isLoading: preparingLanDesktopSend || sendingToLanDesktop,
+                      onTap: (preparingLanDesktopSend || sendingToLanDesktop)
                           ? null
                           : onSendFileToLanDesktop,
-                      icon: (preparingLanDesktopSend || sendingToLanDesktop)
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: ButtonLoadingIndicator(),
-                            )
-                          : const Icon(Icons.lan_rounded),
-                      label: Text(
-                        preparingLanDesktopSend
-                            ? 'جارٍ فتح النافذة...'
-                            : sendingToLanDesktop
-                            ? 'جارٍ النقل...'
-                            : 'إرسال لجهاز على الشبكة',
-                      ),
                     ),
-                    const SizedBox(height: 6),
-                    OutlinedButton.icon(
-                      onPressed: onOpenTransferCenter,
-                      icon: const Icon(Icons.swap_horiz_rounded),
-                      label: const Text('مركز النقل'),
+                    _SidebarItemTile(
+                      icon: Icons.swap_horiz_rounded,
+                      label: 'مركز النقل',
+                      onTap: onOpenTransferCenter,
                     ),
+
                     if (pendingLanReceiveCount > 0) ...[
-                      const SizedBox(height: 6),
-                      FilledButton.icon(
-                        onPressed: onOpenPendingLanReceive,
-                        icon: const Icon(Icons.move_to_inbox_rounded),
-                        label: Text(
-                          'طلبات استقبال معلقة ($pendingLanReceiveCount)',
-                        ),
-                      ),
-                    ],
-                    if (localLanIps.isNotEmpty) ...[
                       const SizedBox(height: 8),
-                      Text(
-                        'IP هذا الجهاز:\n${localLanIps.join('\n')}',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: cs.onSurfaceVariant,
-                          height: 1.35,
+                      InkWell(
+                        onTap: onOpenPendingLanReceive,
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF34C759).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: const Color(0xFF34C759).withValues(alpha: 0.3),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.download_rounded,
+                                size: 16,
+                                color: Color(0xFF34C759),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'طلبات استلام معلقة ($pendingLanReceiveCount)',
+                                  style: const TextStyle(
+                                    color: Color(0xFF34C759),
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
+
+                    const Spacer(),
+                    const SizedBox(height: 12),
+                    Divider(
+                      height: 1,
+                      thickness: 0.5,
+                      color: theme.dividerColor.withValues(alpha: 0.15),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // LAN Status
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? const Color(0xFF242426)
+                            : const Color(0xFFF2F2F7),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: theme.dividerColor.withValues(alpha: 0.12),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                width: 7,
+                                height: 7,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF34C759),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'متصل بالشبكة المحلية',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: cs.onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (localLanIps.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              localLanIps.first,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontFamily: 'monospace',
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _SidebarSectionHeader extends StatelessWidget {
+  const _SidebarSectionHeader({
+    required this.title,
+    this.actionIcon,
+    this.onActionTap,
+  });
+
+  final String title;
+  final IconData? actionIcon;
+  final VoidCallback? onActionTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.5,
+              color: cs.onSurfaceVariant.withValues(alpha: 0.8),
+            ),
+          ),
+        ),
+        if (actionIcon != null)
+          InkWell(
+            onTap: onActionTap,
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.all(2),
+              child: Icon(actionIcon, size: 16, color: cs.onSurfaceVariant),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _SidebarItemTile extends StatelessWidget {
+  const _SidebarItemTile({
+    required this.icon,
+    this.iconColor,
+    required this.label,
+    this.countBadge,
+    this.selected = false,
+    this.isLoading = false,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final Color? iconColor;
+  final String label;
+  final String? countBadge;
+  final bool selected;
+  final bool isLoading;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    final bgColor = selected
+        ? (isDark
+            ? cs.primary.withValues(alpha: 0.22)
+            : cs.primary.withValues(alpha: 0.12))
+        : Colors.transparent;
+    final textColor = selected ? cs.primary : cs.onSurface;
+    final effectiveIconColor = iconColor ?? (selected ? cs.primary : cs.onSurfaceVariant);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 2),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: effectiveIconColor),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: textColor,
+                  ),
+                ),
+              ),
+              if (isLoading)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else if (countBadge != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? cs.primary
+                        : (isDark
+                            ? Colors.white.withValues(alpha: 0.08)
+                            : Colors.black.withValues(alpha: 0.06)),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    countBadge!,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: selected
+                          ? cs.onPrimary
+                          : cs.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -2358,9 +2796,9 @@ class _FilesWorkspace extends StatelessWidget {
     required this.onPrintDocument,
     required this.onRenameDocument,
     required this.onDeleteDocument,
-  
     required this.folders,
     this.currentFolderId,
+    this.currentFolderName,
     this.isGridView = false,
     required this.onRemoveFromFolder,
     required this.onMoveToFolder,
@@ -2369,6 +2807,7 @@ class _FilesWorkspace extends StatelessWidget {
     required this.onGoBack,
     required this.onFolderTap,
     required this.onViewChanged,
+    required this.onCreateFolder,
   });
 
   final int totalDocuments;
@@ -2389,6 +2828,7 @@ class _FilesWorkspace extends StatelessWidget {
 
   final List<DocumentFolder> folders;
   final String? currentFolderId;
+  final String? currentFolderName;
   final bool isGridView;
   final Future<void> Function(String) onRemoveFromFolder;
   final Future<void> Function(String) onMoveToFolder;
@@ -2397,12 +2837,20 @@ class _FilesWorkspace extends StatelessWidget {
   final VoidCallback onGoBack;
   final void Function(String) onFolderTap;
   final void Function(bool) onViewChanged;
+  final VoidCallback onCreateFolder;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        _WorkspaceTopBar(onRefresh: onRefresh),
+        _WorkspaceTopBar(
+          currentFolderId: currentFolderId,
+          currentFolderName: currentFolderName,
+          totalDocuments: totalDocuments,
+          onGoBack: onGoBack,
+          onCreateFolder: onCreateFolder,
+          onRefresh: onRefresh,
+        ),
         Expanded(
           child: _FilesFeed(
             padding: const EdgeInsets.all(18),
@@ -2413,13 +2861,13 @@ class _FilesWorkspace extends StatelessWidget {
                 totalPages: totalPages,
                 totalSize: totalSize,
               ),
-              const SizedBox(height: 14),
               _SearchAndSortBar(
                 searchController: searchController,
                 latestFirst: latestFirst,
                 onSearchChanged: onSearchChanged,
                 onSortChanged: onSortChanged,
-                  isGridView: isGridView, onViewChanged: onViewChanged,
+                isGridView: isGridView,
+                onViewChanged: onViewChanged,
               ),
             ],
             documents: documents,
@@ -2428,15 +2876,15 @@ class _FilesWorkspace extends StatelessWidget {
             onPrint: onPrintDocument,
             onRename: onRenameDocument,
             onDelete: onDeleteDocument,
-              folders: folders,
-              currentFolderId: currentFolderId,
-              isGridView: isGridView,
-              onRemoveFromFolder: onRemoveFromFolder,
-              onMoveToFolder: onMoveToFolder,
-              onFolderRename: onFolderRename,
-              onFolderDelete: onFolderDelete,
-              onGoBack: onGoBack,
-              onFolderTap: onFolderTap,
+            folders: folders,
+            currentFolderId: currentFolderId,
+            isGridView: isGridView,
+            onRemoveFromFolder: onRemoveFromFolder,
+            onMoveToFolder: onMoveToFolder,
+            onFolderRename: onFolderRename,
+            onFolderDelete: onFolderDelete,
+            onGoBack: onGoBack,
+            onFolderTap: onFolderTap,
           ),
         ),
       ],
@@ -2445,49 +2893,159 @@ class _FilesWorkspace extends StatelessWidget {
 }
 
 class _WorkspaceTopBar extends StatelessWidget {
-  const _WorkspaceTopBar({required this.onRefresh});
+  const _WorkspaceTopBar({
+    required this.currentFolderId,
+    required this.currentFolderName,
+    required this.totalDocuments,
+    required this.onGoBack,
+    required this.onCreateFolder,
+    required this.onRefresh,
+  });
 
+  final String? currentFolderId;
+  final String? currentFolderName;
+  final int totalDocuments;
+  final VoidCallback onGoBack;
+  final VoidCallback onCreateFolder;
   final VoidCallback onRefresh;
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
-        color: cs.surface,
+        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
         border: Border(
           bottom: BorderSide(
-            color: Theme.of(context).dividerColor.withValues(alpha: 0.22),
+            color: theme.dividerColor.withValues(alpha: 0.18),
+            width: 0.5,
           ),
         ),
       ),
       child: Row(
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
+          // Breadcrumbs
+          if (currentFolderId != null) ...[
+            IconButton(
+              onPressed: onGoBack,
+              tooltip: 'رجوع للملفات',
+              icon: const Icon(Icons.arrow_forward_rounded, size: 20),
+              style: IconButton.styleFrom(
+                backgroundColor: isDark
+                    ? const Color(0xFF2C2C2E)
+                    : const Color(0xFFF2F2F7),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            InkWell(
+              onTap: onGoBack,
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Text(
                   'الملفات',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  'إدارة المستندات والطباعة والإرسال من مكان واحد',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Icon(
+                Icons.chevron_left_rounded,
+                size: 18,
+                color: cs.onSurfaceVariant.withValues(alpha: 0.6),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF9500).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.folder_rounded,
+                    size: 16,
+                    color: Color(0xFFFF9500),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    currentFolderName ?? 'مجلد',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFFFF9500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            Text(
+              'الملفات',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                fontSize: 20,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? const Color(0xFF2C2C2E)
+                    : const Color(0xFFF2F2F7),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '$totalDocuments ملف',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: cs.onSurfaceVariant,
                 ),
-              ],
+              ),
+            ),
+          ],
+
+          const Spacer(),
+
+          // Actions
+          FilledButton.tonalIcon(
+            onPressed: onCreateFolder,
+            icon: const Icon(Icons.create_new_folder_outlined, size: 18),
+            label: const Text('مجلد جديد'),
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
           ),
-          FilledButton.tonalIcon(
+          const SizedBox(width: 8),
+          IconButton(
             onPressed: onRefresh,
-            icon: const Icon(Icons.refresh, size: 18),
-            label: const Text('تحديث'),
+            tooltip: 'تحديث القائمة',
+            icon: const Icon(Icons.refresh_rounded, size: 20),
+            style: IconButton.styleFrom(
+              backgroundColor: isDark
+                  ? const Color(0xFF2C2C2E)
+                  : const Color(0xFFF2F2F7),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
           ),
         ],
       ),
@@ -2549,7 +3107,6 @@ class _MobileLayout extends StatelessWidget {
     required this.preparingLanDesktopSend,
     required this.sendingToLanDesktop,
     required this.localLanIps,
-  
     required this.folders,
     this.currentFolderId,
     this.isGridView = false,
@@ -2741,9 +3298,9 @@ class _MobileLayout extends StatelessWidget {
             latestFirst: latestFirst,
             onSearchChanged: onSearchChanged,
             onSortChanged: onSortChanged,
-                isGridView: isGridView,
-                onViewChanged: onViewChanged,
-              ),
+            isGridView: isGridView,
+            onViewChanged: onViewChanged,
+          ),
         ],
         documents: documents,
         onRefresh: onRefresh,
@@ -2751,15 +3308,15 @@ class _MobileLayout extends StatelessWidget {
         onPrint: onPrintDocument,
         onRename: onRenameDocument,
         onDelete: onDeleteDocument,
-          folders: folders,
-          currentFolderId: currentFolderId,
-          isGridView: isGridView,
-          onRemoveFromFolder: onRemoveFromFolder,
-          onMoveToFolder: onMoveToFolder,
-          onFolderRename: onFolderRename,
-          onFolderDelete: onFolderDelete,
-          onGoBack: onGoBack,
-          onFolderTap: onFolderTap,
+        folders: folders,
+        currentFolderId: currentFolderId,
+        isGridView: isGridView,
+        onRemoveFromFolder: onRemoveFromFolder,
+        onMoveToFolder: onMoveToFolder,
+        onFolderRename: onFolderRename,
+        onFolderDelete: onFolderDelete,
+        onGoBack: onGoBack,
+        onFolderTap: onFolderTap,
       ),
     );
   }
@@ -2806,127 +3363,144 @@ class _FilesFeed extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final visibleHeader = header.where((entry) => entry is! SizedBox).toList();
 
-    return Padding(padding: padding, child: CustomScrollView(
-      
-      
-      slivers: [
-        SliverToBoxAdapter(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              ...visibleHeader,
-              const SizedBox(height: 14),
-              if (currentFolderId != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: Row(
-                    children: [
-                      TextButton.icon(
-                        onPressed: onGoBack,
-                        icon: const Icon(Icons.arrow_back),
-                        label: const Text('رجوع للرئيسية'),
-                      ),
-                      const Spacer(),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-
-        if (folders.isNotEmpty) ...[
+    return Padding(
+      padding: padding,
+      child: CustomScrollView(
+        slivers: [
           SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 10, right: 4),
-              child: Text(
-                'المجلدات',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ...visibleHeader,
+                const SizedBox(height: 16),
+              ],
             ),
           ),
-          if (isGridView)
-            SliverGrid(
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 220,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 1.0,
+
+          // Folders Section
+          if (folders.isNotEmpty) ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 12, right: 4),
+                child: Row(
+                  children: [
+                    Text(
+                      'المجلدات',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${folders.length}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  return _FolderGridCard(
-                    folder: folders[index],
-                    onTap: () => onFolderTap(folders[index].id),
-                    onRename: () => onFolderRename(folders[index]),
-                    onDelete: () => onFolderDelete(folders[index]),
-                  );
-                },
-                childCount: folders.length,
-              ),
-            )
-          else
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _FolderListCard(
+            ),
+            if (isGridView)
+              SliverGrid(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 200,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 1.05,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    return _FolderGridCard(
                       folder: folders[index],
                       onTap: () => onFolderTap(folders[index].id),
                       onRename: () => onFolderRename(folders[index]),
                       onDelete: () => onFolderDelete(folders[index]),
-                    ),
-                  );
-                },
-                childCount: folders.length,
+                    );
+                  },
+                  childCount: folders.length,
+                ),
+              )
+            else
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _FolderListCard(
+                        folder: folders[index],
+                        onTap: () => onFolderTap(folders[index].id),
+                        onRename: () => onFolderRename(folders[index]),
+                        onDelete: () => onFolderDelete(folders[index]),
+                      ),
+                    );
+                  },
+                  childCount: folders.length,
+                ),
               ),
-            ),
-          const SliverToBoxAdapter(child: SizedBox(height: 24)),
-        ],
+            const SliverToBoxAdapter(child: SizedBox(height: 24)),
+          ],
 
-        if (documents.isNotEmpty) ...[
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 10, right: 4),
-              child: Text(
-                'الملفات',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          // Documents Section
+          if (documents.isNotEmpty) ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 12, right: 4),
+                child: Row(
+                  children: [
+                    Text(
+                      'الملفات والمستندات',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${documents.length}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          if (isGridView)
-            SliverGrid(
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 180,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 0.85,
-              ),
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  return _DocumentGridCard(
-                    document: documents[index],
-                    isInFolder: currentFolderId != null,
-                    onOpen: () => onOpen(documents[index]),
-                    onPrint: () => onPrint(documents[index]),
-                    onRename: () => onRename(documents[index]),
-                    onDelete: () => onDelete(documents[index]),
-                    onMoveToFolder: () => onMoveToFolder(documents[index].id),
-                    onRemoveFromFolder: () => onRemoveFromFolder(documents[index].id),
-                  );
-                },
-                childCount: documents.length,
-              ),
-            )
-          else
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _FileListItem(
+            if (isGridView)
+              SliverGrid(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 180,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 0.82,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    return _DocumentGridCard(
                       document: documents[index],
                       isInFolder: currentFolderId != null,
                       onOpen: () => onOpen(documents[index]),
@@ -2934,23 +3508,44 @@ class _FilesFeed extends StatelessWidget {
                       onRename: () => onRename(documents[index]),
                       onDelete: () => onDelete(documents[index]),
                       onMoveToFolder: () => onMoveToFolder(documents[index].id),
-                      onRemoveFromFolder: () => onRemoveFromFolder(documents[index].id),
-                    ),
-                  );
-                },
-                childCount: documents.length,
+                      onRemoveFromFolder: () =>
+                          onRemoveFromFolder(documents[index].id),
+                    );
+                  },
+                  childCount: documents.length,
+                ),
+              )
+            else
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _FileListItem(
+                        document: documents[index],
+                        isInFolder: currentFolderId != null,
+                        onOpen: () => onOpen(documents[index]),
+                        onPrint: () => onPrint(documents[index]),
+                        onRename: () => onRename(documents[index]),
+                        onDelete: () => onDelete(documents[index]),
+                        onMoveToFolder: () => onMoveToFolder(documents[index].id),
+                        onRemoveFromFolder: () =>
+                            onRemoveFromFolder(documents[index].id),
+                      ),
+                    );
+                  },
+                  childCount: documents.length,
+                ),
               ),
+          ] else if (folders.isEmpty)
+            SliverToBoxAdapter(
+              child: _EmptyFilesState(onRefresh: onRefresh),
             ),
-        ] else if (folders.isEmpty)
-          SliverToBoxAdapter(
-            child: _EmptyFilesState(onRefresh: onRefresh),
-          ),
-      ],
-    ),
+        ],
+      ),
     );
   }
 }
-
 
 class _AnnouncementsSection extends StatelessWidget {
   const _AnnouncementsSection({required this.announcementsState});
@@ -2984,23 +3579,15 @@ class _AnnouncementsSection extends StatelessWidget {
               children: visible
                   .map(
                     (a) => Padding(
-                      padding: const EdgeInsets.only(
-                        left: 14,
-                      ), // Margin between cards
+                      padding: const EdgeInsets.only(left: 14),
                       child: Container(
-                        width: 320, // Fixed width for nice grid feel
-                        padding: const EdgeInsets.all(14),
+                        width: 320,
+                        padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: _toneColor(
-                            context,
-                            a.tone,
-                          ).withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(16),
+                          color: _toneColor(context, a.tone).withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(14),
                           border: Border.all(
-                            color: _toneColor(
-                              context,
-                              a.tone,
-                            ).withValues(alpha: 0.15),
+                            color: _toneColor(context, a.tone).withValues(alpha: 0.15),
                             width: 1,
                           ),
                         ),
@@ -3008,12 +3595,9 @@ class _AnnouncementsSection extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Container(
-                              padding: const EdgeInsets.all(8),
+                              padding: const EdgeInsets.all(7),
                               decoration: BoxDecoration(
-                                color: _toneColor(
-                                  context,
-                                  a.tone,
-                                ).withValues(alpha: 0.1),
+                                color: _toneColor(context, a.tone).withValues(alpha: 0.12),
                                 shape: BoxShape.circle,
                               ),
                               child: Icon(
@@ -3021,10 +3605,10 @@ class _AnnouncementsSection extends StatelessWidget {
                                     ? Icons.push_pin_rounded
                                     : Icons.campaign_rounded,
                                 color: _toneColor(context, a.tone),
-                                size: 18,
+                                size: 16,
                               ),
                             ),
-                            const SizedBox(width: 12),
+                            const SizedBox(width: 10),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -3038,21 +3622,21 @@ class _AnnouncementsSection extends StatelessWidget {
                                         .titleSmall
                                         ?.copyWith(fontWeight: FontWeight.w700),
                                   ),
-                                  const SizedBox(height: 4),
+                                  const SizedBox(height: 3),
                                   Text(
                                     a.message,
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
                                     style: Theme.of(context)
                                         .textTheme
-                                        .bodyMedium
+                                        .bodySmall
                                         ?.copyWith(
                                           color: Theme.of(context)
                                               .textTheme
                                               .bodyMedium
                                               ?.color
                                               ?.withValues(alpha: 0.8),
-                                          fontSize: 13,
+                                          fontSize: 12,
                                         ),
                                   ),
                                 ],
@@ -3090,26 +3674,29 @@ class _StatsRow extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: _StatChip(
-              label: 'ملف',
+            child: _AppleStatCapsule(
+              icon: Icons.description_rounded,
+              iconColor: const Color(0xFF007AFF), // Apple Blue
+              label: 'مستندات',
               value: '$totalDocuments',
-              icon: Icons.insert_drive_file_outlined,
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
-            child: _StatChip(
+            child: _AppleStatCapsule(
+              icon: Icons.auto_stories_rounded,
+              iconColor: const Color(0xFFAF52DE), // Apple Purple
               label: 'صفحة',
               value: '$totalPages',
-              icon: Icons.description_outlined,
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
-            child: _StatChip(
-              label: 'الحجم',
+            child: _AppleStatCapsule(
+              icon: Icons.pie_chart_rounded,
+              iconColor: const Color(0xFF34C759), // Apple Green
+              label: 'إجمالي الحجم',
               value: formatFileSize(totalSize),
-              icon: Icons.storage_outlined,
             ),
           ),
         ],
@@ -3118,98 +3705,71 @@ class _StatsRow extends StatelessWidget {
   }
 }
 
-class _MobileStatsColumn extends StatelessWidget {
-  const _MobileStatsColumn({
-    required this.totalDocuments,
-    required this.totalPages,
-    required this.totalSize,
-  });
-
-  final int totalDocuments;
-  final int totalPages;
-  final int totalSize;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Row(
-        children: [
-          Expanded(
-            child: _StatChip(
-              label: 'ملف',
-              value: '$totalDocuments',
-              icon: Icons.insert_drive_file_outlined,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _StatChip(
-              label: 'صفحة',
-              value: '$totalPages',
-              icon: Icons.description_outlined,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _StatChip(
-              label: 'الحجم',
-              value: formatFileSize(totalSize),
-              icon: Icons.storage_outlined,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatChip extends StatelessWidget {
-  const _StatChip({
+class _AppleStatCapsule extends StatelessWidget {
+  const _AppleStatCapsule({
+    required this.icon,
+    required this.iconColor,
     required this.label,
     required this.value,
-    required this.icon,
   });
 
+  final IconData icon;
+  final Color iconColor;
   final String label;
   final String value;
-  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final gradientTop = cs.primaryContainer.withValues(alpha: 0.55);
-    final gradientBottom = cs.primaryContainer.withValues(alpha: 0.20);
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [gradientTop, gradientBottom],
+        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
+          width: 0.8,
         ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
-        boxShadow: [
-          BoxShadow(
-            color: cs.shadow.withValues(alpha: 0.06),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Icon(icon, size: 18, color: cs.primary),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: iconColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: iconColor, size: 20),
           ),
-          Text(label, style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                ),
+                Text(
+                  label,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -3217,8 +3777,6 @@ class _StatChip extends StatelessWidget {
 }
 
 class _SearchAndSortBar extends StatelessWidget {
-  final bool isGridView;
-  final void Function(bool) onViewChanged;
   const _SearchAndSortBar({
     required this.searchController,
     required this.latestFirst,
@@ -3232,91 +3790,225 @@ class _SearchAndSortBar extends StatelessWidget {
   final bool latestFirst;
   final VoidCallback onSearchChanged;
   final ValueChanged<bool> onSortChanged;
+  final bool isGridView;
+  final ValueChanged<bool> onViewChanged;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
     return Row(
       children: [
-        // Grid / List toggle
+        // View Toggle (Apple segmented pill)
         Container(
+          height: 40,
+          padding: const EdgeInsets.all(3),
           decoration: BoxDecoration(
-            color: isDark ? scheme.surfaceContainer : const Color(0xFFF1F5F9),
+            color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
             borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isDark ? const Color(0xFF3A3A3C) : const Color(0xFFE5E5EA),
+              width: 0.5,
+            ),
           ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            _ViewToggleBtn(
-              icon: Icons.view_list_rounded,
-              selected: !isGridView,
-              onTap: () => onViewChanged(false),
-            ),
-            _ViewToggleBtn(
-              icon: Icons.grid_view_rounded,
-              selected: isGridView,
-              onTap: () => onViewChanged(true),
-            ),
-          ]),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _AppleSegmentBtn(
+                icon: Icons.grid_view_rounded,
+                tooltip: 'عرض شبكي',
+                isSelected: isGridView,
+                onTap: () => onViewChanged(true),
+              ),
+              _AppleSegmentBtn(
+                icon: Icons.view_list_rounded,
+                tooltip: 'عرض كقائمة',
+                isSelected: !isGridView,
+                onTap: () => onViewChanged(false),
+              ),
+            ],
+          ),
         ),
         const SizedBox(width: 10),
+
+        // Apple Search Bar
         Expanded(
-          child: TextField(
-            controller: searchController,
-            onChanged: (_) => onSearchChanged(),
-            decoration: InputDecoration(
-              hintText: 'بحث باسم الملف',
-              prefixIcon: const Icon(Icons.search, size: 20),
-              suffixIcon: searchController.text.isEmpty
-                  ? null
-                  : IconButton(
-                      onPressed: () {
-                        searchController.clear();
-                        onSearchChanged();
-                      },
-                      icon: const Icon(Icons.close, size: 18),
-                    ),
+          child: Container(
+            height: 40,
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isDark ? const Color(0xFF3A3A3C) : const Color(0xFFE5E5EA),
+                width: 0.5,
+              ),
+            ),
+            child: TextField(
+              controller: searchController,
+              onChanged: (_) => onSearchChanged(),
+              style: const TextStyle(fontSize: 13),
+              decoration: InputDecoration(
+                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                border: InputBorder.none,
+                isDense: true,
+                hintText: 'بحث في المستندات والملفات...',
+                hintStyle: TextStyle(
+                  fontSize: 13,
+                  color: cs.onSurfaceVariant.withValues(alpha: 0.7),
+                ),
+                prefixIcon: Icon(
+                  Icons.search_rounded,
+                  size: 18,
+                  color: cs.onSurfaceVariant,
+                ),
+                suffixIcon: searchController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.cancel_rounded, size: 16),
+                        color: cs.onSurfaceVariant,
+                        onPressed: () {
+                          searchController.clear();
+                          onSearchChanged();
+                        },
+                      ),
+              ),
             ),
           ),
         ),
         const SizedBox(width: 10),
-        SegmentedButton<bool>(
-          style: const ButtonStyle(visualDensity: VisualDensity.compact),
-          segments: const [
-            ButtonSegment<bool>(value: true, label: Text('الأحدث')),
-            ButtonSegment<bool>(value: false, label: Text('الأقدم')),
-          ],
-          selected: {latestFirst},
-          onSelectionChanged: (v) => onSortChanged(v.first),
+
+        // Sort Pill
+        Container(
+          height: 40,
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isDark ? const Color(0xFF3A3A3C) : const Color(0xFFE5E5EA),
+              width: 0.5,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _AppleTextSegmentBtn(
+                label: 'الأحدث',
+                isSelected: latestFirst,
+                onTap: () => onSortChanged(true),
+              ),
+              _AppleTextSegmentBtn(
+                label: 'الأقدم',
+                isSelected: !latestFirst,
+                onTap: () => onSortChanged(false),
+              ),
+            ],
+          ),
         ),
       ],
     );
   }
 }
 
-class _ViewToggleBtn extends StatelessWidget {
-  const _ViewToggleBtn({
+class _AppleSegmentBtn extends StatelessWidget {
+  const _AppleSegmentBtn({
     required this.icon,
-    required this.selected,
+    required this.tooltip,
+    required this.isSelected,
     required this.onTap,
   });
 
   final IconData icon;
-  final bool selected;
+  final String tooltip;
+  final bool isSelected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? (isDark ? const Color(0xFF3A3A3C) : Colors.white)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 3,
+                      offset: const Offset(0, 1),
+                    )
+                  ]
+                : null,
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: isSelected ? cs.primary : cs.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AppleTextSegmentBtn extends StatelessWidget {
+  const _AppleTextSegmentBtn({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(8),
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? scheme.primary : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
+          color: isSelected
+              ? (isDark ? const Color(0xFF3A3A3C) : Colors.white)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 3,
+                    offset: const Offset(0, 1),
+                  )
+                ]
+              : null,
         ),
-        child: Icon(icon, size: 20, color: selected ? scheme.onPrimary : scheme.onSurfaceVariant),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+            color: isSelected ? cs.primary : cs.onSurfaceVariant,
+          ),
+        ),
       ),
     );
   }
@@ -3338,55 +4030,151 @@ class _FolderGridCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
     final docCount = folder.documentIds.length;
+    final folderColor = folder.colorValue != null
+        ? Color(folder.colorValue!)
+        : const Color(0xFFFF9500);
 
     return DragTarget<String>(
-      onWillAcceptWithDetails: (details) => !folder.documentIds.contains(details.data),
+      onWillAcceptWithDetails: (details) =>
+          !folder.documentIds.contains(details.data),
       onAcceptWithDetails: (details) async {
-        await ref.read(documentFoldersProvider.notifier).moveDocumentToFolder(details.data, folder.id);
+        await ref
+            .read(documentFoldersProvider.notifier)
+            .moveDocumentToFolder(details.data, folder.id);
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('تم النقل إلى ${folder.name}')),
+            SnackBar(
+              behavior: SnackBarBehavior.floating,
+              content: Text('تم نقل الملف إلى «${folder.name}»'),
+            ),
           );
         }
       },
       builder: (context, candidateData, rejectedData) {
         final isHovered = candidateData.isNotEmpty;
         return InkWell(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           onTap: onTap,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: isHovered ? theme.colorScheme.primaryContainer : (isDark ? const Color(0xFF1C1C1E) : Colors.white),
-              borderRadius: BorderRadius.circular(14),
+              color: isHovered
+                  ? const Color(0xFF007AFF).withValues(alpha: 0.10)
+                  : (isDark ? const Color(0xFF1C1C1E) : Colors.white),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: isHovered ? theme.colorScheme.primary : (isDark ? Colors.white.withOpacity(0.07) : const Color(0xFFE2E8F0)),
+                color: isHovered
+                    ? const Color(0xFF007AFF)
+                    : (isDark
+                        ? const Color(0xFF2C2C2E)
+                        : const Color(0xFFE5E5EA)),
                 width: isHovered ? 2 : 1,
               ),
             ),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Icon(isHovered ? Icons.folder_open_rounded : Icons.folder_rounded, size: 56, color: const Color(0xFFF59E0B)),
-                const SizedBox(height: 10),
-                Text(folder.name, maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700)),
-                Text('$docCount ملف', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, fontSize: 11)),
-                PopupMenuButton<String>(
-                  icon: Icon(Icons.more_horiz, size: 18, color: theme.colorScheme.onSurfaceVariant),
-                  onSelected: (action) {
-                    if (action == 'rename') {
-                      onRename();
-                    } else if (action == 'delete') {
-                      onDelete();
-                    }
-                  },
-                  itemBuilder: (_) => [
-                    const PopupMenuItem(value: 'rename', child: Text('إعادة تسمية')),
-                    const PopupMenuItem(value: 'delete', child: Text('حذف', style: TextStyle(color: Colors.red))),
+                // Top row with color indicator & options
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: folderColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    PopupMenuButton<String>(
+                      tooltip: 'خيارات المجلد',
+                      icon: Icon(
+                        Icons.more_horiz_rounded,
+                        size: 18,
+                        color: cs.onSurfaceVariant,
+                      ),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onSelected: (action) {
+                        if (action == 'rename') onRename();
+                        if (action == 'delete') onDelete();
+                      },
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(
+                          value: 'rename',
+                          child: Row(
+                            children: [
+                              Icon(Icons.drive_file_rename_outline_rounded,
+                                  size: 18),
+                              SizedBox(width: 8),
+                              Text('إعادة تسمية'),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'delete',
+                          child: Row(
+                            children: [
+                              Icon(Icons.delete_outline_rounded,
+                                  size: 18, color: Colors.red),
+                              SizedBox(width: 8),
+                              Text('حذف', style: TextStyle(color: Colors.red)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
+                const Spacer(),
+
+                // Center Icon
+                Container(
+                  width: 54,
+                  height: 54,
+                  decoration: BoxDecoration(
+                    color: folderColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(
+                    isHovered
+                        ? Icons.folder_open_rounded
+                        : Icons.folder_rounded,
+                    size: 32,
+                    color: folderColor,
+                  ),
+                ),
+                const SizedBox(height: 10),
+
+                // Name
+                Text(
+                  folder.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 2),
+
+                // Count or Drop target feedback
+                Text(
+                  isHovered ? 'أفلت لنقل الملف هنا' : '$docCount ملف',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: isHovered
+                        ? const Color(0xFF007AFF)
+                        : cs.onSurfaceVariant,
+                    fontWeight: isHovered ? FontWeight.w700 : FontWeight.w500,
+                    fontSize: 11,
+                  ),
+                ),
+                const Spacer(),
               ],
             ),
           ),
@@ -3412,47 +4200,125 @@ class _FolderListCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
     final docCount = folder.documentIds.length;
+    final folderColor = folder.colorValue != null
+        ? Color(folder.colorValue!)
+        : const Color(0xFFFF9500);
 
     return DragTarget<String>(
-      onWillAcceptWithDetails: (details) => !folder.documentIds.contains(details.data),
+      onWillAcceptWithDetails: (details) =>
+          !folder.documentIds.contains(details.data),
       onAcceptWithDetails: (details) async {
-        await ref.read(documentFoldersProvider.notifier).moveDocumentToFolder(details.data, folder.id);
+        await ref
+            .read(documentFoldersProvider.notifier)
+            .moveDocumentToFolder(details.data, folder.id);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              behavior: SnackBarBehavior.floating,
+              content: Text('تم نقل الملف إلى «${folder.name}»'),
+            ),
+          );
+        }
       },
       builder: (context, candidateData, rejectedData) {
         final isHovered = candidateData.isNotEmpty;
         return InkWell(
+          borderRadius: BorderRadius.circular(14),
           onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: isHovered ? theme.colorScheme.primaryContainer : (isDark ? const Color(0xFF1C1C1E) : Colors.white),
+              color: isHovered
+                  ? const Color(0xFF007AFF).withValues(alpha: 0.10)
+                  : (isDark ? const Color(0xFF1C1C1E) : Colors.white),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: isHovered ? theme.colorScheme.primary : (isDark ? Colors.white.withOpacity(0.07) : const Color(0xFFE2E8F0))),
+              border: Border.all(
+                color: isHovered
+                    ? const Color(0xFF007AFF)
+                    : (isDark
+                        ? const Color(0xFF2C2C2E)
+                        : const Color(0xFFE5E5EA)),
+                width: isHovered ? 2 : 1,
+              ),
             ),
             child: Row(
               children: [
-                Icon(Icons.folder_rounded, size: 44, color: const Color(0xFFF59E0B)),
-                const SizedBox(width: 14),
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: folderColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    isHovered
+                        ? Icons.folder_open_rounded
+                        : Icons.folder_rounded,
+                    size: 24,
+                    color: folderColor,
+                  ),
+                ),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(folder.name, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-                      Text('$docCount ملف', style: theme.textTheme.bodySmall),
+                      Text(
+                        folder.name,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
+                      ),
+                      Text(
+                        isHovered ? 'أفلت للنقل إلى هنا' : '$docCount ملف',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isHovered
+                              ? const Color(0xFF007AFF)
+                              : cs.onSurfaceVariant,
+                          fontWeight:
+                              isHovered ? FontWeight.w700 : FontWeight.w500,
+                        ),
+                      ),
                     ],
                   ),
                 ),
                 PopupMenuButton<String>(
-                  icon: Icon(Icons.more_horiz, color: theme.colorScheme.onSurfaceVariant),
+                  tooltip: 'خيارات المجلد',
+                  icon: Icon(Icons.more_horiz_rounded,
+                      color: cs.onSurfaceVariant),
                   onSelected: (action) {
                     if (action == 'rename') onRename();
                     if (action == 'delete') onDelete();
                   },
                   itemBuilder: (_) => [
-                    const PopupMenuItem(value: 'rename', child: Text('إعادة تسمية')),
-                    const PopupMenuItem(value: 'delete', child: Text('حذف', style: TextStyle(color: Colors.red))),
+                    const PopupMenuItem(
+                      value: 'rename',
+                      child: Row(
+                        children: [
+                          Icon(Icons.drive_file_rename_outline_rounded,
+                              size: 18),
+                          SizedBox(width: 8),
+                          Text('إعادة تسمية'),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete_outline_rounded,
+                              size: 18, color: Colors.red),
+                          SizedBox(width: 8),
+                          Text('حذف', style: TextStyle(color: Colors.red)),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -3488,52 +4354,114 @@ class _DocumentGridCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
+    final typeInfo = _getFileTypeInfo(document.fileName);
 
-    final card = GestureDetector(
+    final card = InkWell(
+      borderRadius: BorderRadius.circular(16),
       onTap: onOpen,
       child: Container(
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: isDark ? Colors.white.withOpacity(0.07) : const Color(0xFFE2E8F0)),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
+            width: 1,
+          ),
         ),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            // Top Row: Type badge + FileMenu
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: typeInfo.color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    typeInfo.label,
+                    style: TextStyle(
+                      color: typeInfo.color,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                _FileMenu(
+                  isInFolder: isInFolder,
+                  onOpen: onOpen,
+                  onPrint: onPrint,
+                  onRename: onRename,
+                  onDelete: onDelete,
+                  onMoveToFolder: onMoveToFolder,
+                  onRemoveFromFolder: onRemoveFromFolder,
+                ),
+              ],
+            ),
+            const Spacer(),
+
+            // Center File Icon
             Container(
-              width: 56,
-              height: 56,
+              width: 52,
+              height: 52,
               decoration: BoxDecoration(
-                color: const Color(0xFFDC2626).withOpacity(0.1),
+                color: typeInfo.color.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: const Icon(Icons.picture_as_pdf_rounded, color: Color(0xFFDC2626), size: 34),
+              child: Icon(typeInfo.icon, color: typeInfo.color, size: 28),
             ),
             const SizedBox(height: 10),
+
+            // File Name
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Text(document.fileName, maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700)),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                document.fileName,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                  height: 1.25,
+                ),
+              ),
             ),
             const SizedBox(height: 4),
-            Text(formatFileSize(document.fileSize), style: theme.textTheme.bodySmall?.copyWith(fontSize: 11)),
-            _FileMenu(
-              isInFolder: isInFolder,
-              onPrint: onPrint,
-              onRename: onRename,
-              onDelete: onDelete,
-              onMoveToFolder: onMoveToFolder,
-              onRemoveFromFolder: onRemoveFromFolder,
+
+            // Metadata: Size & Date
+            Text(
+              '${formatFileSize(document.fileSize)} • ${formatDate(document.createdAt)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 10,
+                color: cs.onSurfaceVariant,
+              ),
             ),
+            const Spacer(),
           ],
         ),
       ),
     );
 
-    return LongPressDraggable<String>(
+    return Draggable<String>(
       data: document.id,
-      feedback: Material(color: Colors.transparent, child: Opacity(opacity: 0.8, child: SizedBox(width: 150, child: card))),
-      childWhenDragging: Opacity(opacity: 0.3, child: card),
+      feedback: Material(
+        color: Colors.transparent,
+        child: Opacity(
+          opacity: 0.85,
+          child: SizedBox(width: 160, height: 160, child: card),
+        ),
+      ),
+      childWhenDragging: Opacity(opacity: 0.35, child: card),
       child: card,
     );
   }
@@ -3563,40 +4491,105 @@ class _FileListItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
+    final typeInfo = _getFileTypeInfo(document.fileName);
 
     final card = InkWell(
+      borderRadius: BorderRadius.circular(12),
       onTap: onOpen,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-          border: Border(bottom: BorderSide(color: theme.colorScheme.outlineVariant.withOpacity(0.5), width: 0.5)),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
+            width: 0.8,
+          ),
         ),
         child: Row(
           children: [
             Container(
-              width: 48,
-              height: 48,
+              width: 42,
+              height: 42,
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+                color: typeInfo.color.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.picture_as_pdf_rounded, color: Color(0xFFDC2626), size: 28),
+              child: Icon(typeInfo.icon, color: typeInfo.color, size: 24),
             ),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(document.fileName, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, fontSize: 15)),
-                  const SizedBox(height: 4),
-                  Text('${formatDate(document.createdAt)} • ${formatFileSize(document.fileSize)}', style: theme.textTheme.bodySmall),
+                  Text(
+                    document.fileName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: typeInfo.color.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          typeInfo.label,
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: typeInfo.color,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${formatFileSize(document.fileSize)} • ${formatDate(document.createdAt)}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                      if (document.pageCount > 0) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          '• ${document.pageCount} صفحة',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ],
               ),
             ),
+            IconButton(
+              tooltip: 'فتح المستند',
+              icon: const Icon(Icons.open_in_new_rounded, size: 18),
+              onPressed: onOpen,
+              color: cs.onSurfaceVariant,
+            ),
+            IconButton(
+              tooltip: 'طباعة',
+              icon: const Icon(Icons.print_outlined, size: 18),
+              onPressed: onPrint,
+              color: cs.onSurfaceVariant,
+            ),
             _FileMenu(
               isInFolder: isInFolder,
+              onOpen: onOpen,
               onPrint: onPrint,
               onRename: onRename,
               onDelete: onDelete,
@@ -3608,20 +4601,30 @@ class _FileListItem extends StatelessWidget {
       ),
     );
 
-    return LongPressDraggable<String>(
+    return Draggable<String>(
       data: document.id,
-      feedback: Material(color: Colors.transparent, child: Opacity(opacity: 0.8, child: SizedBox(width: MediaQuery.of(context).size.width * 0.7, child: card))),
-      childWhenDragging: Opacity(opacity: 0.3, child: card),
+      feedback: Material(
+        color: Colors.transparent,
+        child: Opacity(
+          opacity: 0.85,
+          child: SizedBox(
+            width: MediaQuery.of(context).size.width * 0.4,
+            child: card,
+          ),
+        ),
+      ),
+      childWhenDragging: Opacity(opacity: 0.35, child: card),
       child: card,
     );
   }
 }
 
-enum _FileAction { print, rename, delete, moveToFolder, removeFromFolder }
+enum _FileAction { open, print, rename, delete, moveToFolder, removeFromFolder }
 
 class _FileMenu extends StatelessWidget {
   const _FileMenu({
     required this.isInFolder,
+    required this.onOpen,
     required this.onPrint,
     required this.onRename,
     required this.onDelete,
@@ -3630,6 +4633,7 @@ class _FileMenu extends StatelessWidget {
   });
 
   final bool isInFolder;
+  final VoidCallback onOpen;
   final VoidCallback onPrint;
   final VoidCallback onRename;
   final VoidCallback onDelete;
@@ -3638,31 +4642,95 @@ class _FileMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return PopupMenuButton<_FileAction>(
-      tooltip: 'الخيارات',
+      tooltip: 'خيارات الملف',
+      icon: Icon(Icons.more_horiz_rounded, size: 18, color: cs.onSurfaceVariant),
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
       onSelected: (value) {
         switch (value) {
-          case _FileAction.print: onPrint();
-          case _FileAction.rename: onRename();
-          case _FileAction.delete: onDelete();
-          case _FileAction.moveToFolder: onMoveToFolder();
-          case _FileAction.removeFromFolder: onRemoveFromFolder();
+          case _FileAction.open:
+            onOpen();
+          case _FileAction.print:
+            onPrint();
+          case _FileAction.rename:
+            onRename();
+          case _FileAction.delete:
+            onDelete();
+          case _FileAction.moveToFolder:
+            onMoveToFolder();
+          case _FileAction.removeFromFolder:
+            onRemoveFromFolder();
         }
       },
       itemBuilder: (context) => [
-        const PopupMenuItem(value: _FileAction.print, child: ListTile(leading: Icon(Icons.print_rounded), title: Text('طباعة'), contentPadding: EdgeInsets.zero)),
-        const PopupMenuItem(value: _FileAction.rename, child: ListTile(leading: Icon(Icons.drive_file_rename_outline), title: Text('إعادة تسمية'), contentPadding: EdgeInsets.zero)),
+        const PopupMenuItem(
+          value: _FileAction.open,
+          child: Row(
+            children: [
+              Icon(Icons.open_in_new_rounded, size: 18),
+              SizedBox(width: 8),
+              Text('فتح المستند'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: _FileAction.print,
+          child: Row(
+            children: [
+              Icon(Icons.print_outlined, size: 18),
+              SizedBox(width: 8),
+              Text('طباعة'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: _FileAction.moveToFolder,
+          child: Row(
+            children: [
+              Icon(Icons.drive_file_move_outlined, size: 18),
+              SizedBox(width: 8),
+              Text('نقل لمجلد...'),
+            ],
+          ),
+        ),
         if (isInFolder)
-          const PopupMenuItem(value: _FileAction.removeFromFolder, child: ListTile(leading: Icon(Icons.folder_off_outlined), title: Text('إزالة من الفولدر'), contentPadding: EdgeInsets.zero))
-        else
-          const PopupMenuItem(value: _FileAction.moveToFolder, child: ListTile(leading: Icon(Icons.drive_file_move_outline), title: Text('نقل لفولدر'), contentPadding: EdgeInsets.zero)),
+          const PopupMenuItem(
+            value: _FileAction.removeFromFolder,
+            child: Row(
+              children: [
+                Icon(Icons.drive_file_move_rtl_outlined, size: 18),
+                SizedBox(width: 8),
+                Text('إخراج من المجلد'),
+              ],
+            ),
+          ),
+        const PopupMenuItem(
+          value: _FileAction.rename,
+          child: Row(
+            children: [
+              Icon(Icons.drive_file_rename_outline_rounded, size: 18),
+              SizedBox(width: 8),
+              Text('إعادة تسمية'),
+            ],
+          ),
+        ),
         const PopupMenuDivider(),
-        const PopupMenuItem(value: _FileAction.delete, child: ListTile(leading: Icon(Icons.delete_outline, color: Colors.red), title: Text('حذف', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+        const PopupMenuItem(
+          value: _FileAction.delete,
+          child: Row(
+            children: [
+              Icon(Icons.delete_outline_rounded, size: 18, color: Colors.red),
+              SizedBox(width: 8),
+              Text('حذف', style: TextStyle(color: Colors.red)),
+            ],
+          ),
+        ),
       ],
     );
   }
 }
-
 
 class _AdminOverviewCard extends StatelessWidget {
   const _AdminOverviewCard({
@@ -3675,14 +4743,17 @@ class _AdminOverviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
+        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3692,30 +4763,19 @@ class _AdminOverviewCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   'ملخص المستخدمين',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
               TextButton(onPressed: onGoToAdmin, child: const Text('التفاصيل')),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           usersState.when(
             loading: () => const Padding(
               padding: EdgeInsets.all(10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ShimmerSkeleton(width: 120, height: 12),
-                  SizedBox(height: 8),
-                  ShimmerSkeleton(width: 184, height: 12),
-                  SizedBox(height: 8),
-                  ShimmerSkeleton(width: 146, height: 12),
-                  SizedBox(height: 10),
-                  ShimmerSkeleton(height: 30, borderRadius: 10),
-                ],
-              ),
+              child: ShimmerSkeleton(height: 30, borderRadius: 10),
             ),
             error: (e, _) => Text(e.toString()),
             data: (users) {
@@ -3766,17 +4826,17 @@ class _FilesDashboardLoading extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(18),
       children: const [
-        ShimmerSkeleton(height: 62, borderRadius: 16),
+        ShimmerSkeleton(height: 52, borderRadius: 14),
         SizedBox(height: 12),
-        ShimmerSkeleton(height: 88, borderRadius: 16),
+        ShimmerSkeleton(height: 72, borderRadius: 14),
         SizedBox(height: 12),
-        ShimmerSkeleton(height: 46, borderRadius: 16),
+        ShimmerSkeleton(height: 42, borderRadius: 10),
         SizedBox(height: 16),
-        ShimmerSkeleton(height: 82, borderRadius: 16),
+        ShimmerSkeleton(height: 76, borderRadius: 14),
         SizedBox(height: 10),
-        ShimmerSkeleton(height: 82, borderRadius: 16),
+        ShimmerSkeleton(height: 76, borderRadius: 14),
         SizedBox(height: 10),
-        ShimmerSkeleton(height: 82, borderRadius: 16),
+        ShimmerSkeleton(height: 76, borderRadius: 14),
       ],
     );
   }
@@ -3795,130 +4855,40 @@ class _AdminMetricChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: cs.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.35)),
+        color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isDark ? const Color(0xFF3A3A3C) : const Color(0xFFE5E5EA),
+          width: 0.5,
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: cs.primary),
+          Icon(icon, size: 15, color: cs.primary),
           const SizedBox(width: 6),
           Text(
             value,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+            ),
           ),
           const SizedBox(width: 4),
-          Text(label, style: Theme.of(context).textTheme.bodySmall),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: cs.onSurfaceVariant,
+            ),
+          ),
         ],
-      ),
-    );
-  }
-}
-
-class _BrandHeader extends StatelessWidget {
-  const _BrandHeader({required this.userName});
-  final String userName;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            color: cs.primaryContainer,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(
-            Icons.folder_copy_outlined,
-            color: cs.onPrimaryContainer,
-            size: 20,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'اسكان الملفات',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              if (userName.isNotEmpty)
-                Text(
-                  userName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _NavTile extends StatelessWidget {
-  const _NavTile({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    this.isDestructive = false,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final bool isDestructive;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final bg = selected ? cs.primaryContainer : Colors.transparent;
-    final fg = selected
-        ? cs.onPrimaryContainer
-        : isDestructive
-        ? cs.error
-        : cs.onSurface;
-
-    return Material(
-      color: bg,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-          child: Row(
-            children: [
-              Icon(icon, color: fg, size: 20),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  label,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: fg,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -3930,36 +4900,70 @@ class _EmptyFilesState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 48),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.folder_off_outlined,
-              size: 52,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
+        padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 36),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
             ),
-            const SizedBox(height: 14),
-            Text(
-              'لا توجد ملفات بعد',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'ستظهر الملفات هنا فور إضافتها.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 18),
-            OutlinedButton.icon(
-              onPressed: onRefresh,
-              icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('تحديث'),
-            ),
-          ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF2C2C2E)
+                      : const Color(0xFFF2F2F7),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Icon(
+                  Icons.folder_open_rounded,
+                  size: 32,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'لا توجد ملفات في هذا المجلد',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'يمكنك سحب وإفلات الملفات أو استخدام مركز النقل لاستيراد ملفات جديدة.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 18),
+              FilledButton.tonalIcon(
+                onPressed: onRefresh,
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('تحديث القائمة'),
+                style: FilledButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

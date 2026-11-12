@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/network/api_client.dart';
@@ -16,6 +17,35 @@ import 'permission_request_coordinator.dart';
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   try {
     await Firebase.initializeApp();
+    final data = message.data;
+    final type = data['type']?.toString();
+    final conversationId = data['conversationId']?.toString().trim();
+
+    final plugin = FlutterLocalNotificationsPlugin();
+
+    if (type == 'dismiss_chat' &&
+        conversationId != null &&
+        conversationId.isNotEmpty) {
+      const int summaryIdOffset = 1000000;
+      final summaryId =
+          (conversationId.hashCode.abs() % 800000) + summaryIdOffset;
+      await plugin.cancel(summaryId);
+      final androidPlugin = plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      await androidPlugin?.cancel(summaryId, tag: 'chat_$conversationId');
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final session = prefs.getString('auth_session_v1') ??
+        prefs.getString('auth_session');
+    final token = prefs.getString('auth_token');
+    final isLoggedOut = (session == null || session.isEmpty) &&
+        (token == null || token.isEmpty);
+    if (isLoggedOut) {
+      await plugin.cancelAll();
+      return;
+    }
   } catch (_) {}
 }
 
@@ -77,6 +107,21 @@ class PushNotificationService {
       message,
     ) async {
       final payload = _messagePayload(message);
+      final type = payload['type']?.toString();
+      final conversationId = payload['conversationId']?.toString().trim();
+
+      if (type == 'dismiss_chat' &&
+          conversationId != null &&
+          conversationId.isNotEmpty) {
+        await _localNotificationService.cancelConversationNotifications(conversationId);
+        return;
+      }
+
+      final authToken = await _authRepository.getToken();
+      if (authToken == null || authToken.isEmpty) {
+        return;
+      }
+
       final title =
           message.notification?.title ??
           payload['title']?.toString() ??
@@ -122,26 +167,43 @@ class PushNotificationService {
     await _registerToken(token);
   }
 
+  Future<String?> getCurrentToken() async {
+    try {
+      if (!_firebaseReady) await initialize();
+      return await FirebaseMessaging.instance.getToken();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> unregisterCurrentDevice() async {
     await initialize();
     if (!_firebaseReady) {
       return;
     }
-    final token = await FirebaseMessaging.instance.getToken();
-    if (token == null || token.trim().isEmpty) {
-      return;
-    }
+    String? token;
+    try {
+      token = await FirebaseMessaging.instance.getToken();
+    } catch (_) {}
+
     final authToken = await _authRepository.getToken();
-    if (authToken == null || authToken.isEmpty) {
-      return;
+    final deviceId = await _loadOrCreateDeviceId();
+
+    if (authToken != null && authToken.isNotEmpty) {
+      try {
+        await _apiClient.dio.delete<Map<String, dynamic>>(
+          '/api/users/me/push-devices',
+          data: {
+            if (token != null && token.isNotEmpty) 'token': token,
+            'deviceId': deviceId,
+          },
+          options: Options(headers: {'Authorization': 'Bearer $authToken'}),
+        );
+      } catch (_) {}
     }
 
     try {
-      await _apiClient.dio.delete<Map<String, dynamic>>(
-        '/api/users/me/push-devices',
-        data: {'token': token},
-        options: Options(headers: {'Authorization': 'Bearer $authToken'}),
-      );
+      await FirebaseMessaging.instance.deleteToken();
     } catch (_) {}
   }
 

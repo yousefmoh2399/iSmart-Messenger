@@ -283,6 +283,11 @@ bool FlutterWindow::OnCreate() {
   // window is shown. It is a no-op if the first frame hasn't completed yet.
   flutter_controller_->ForceRedraw();
 
+  // Windows 7 / slow D3D11 swapchain fallback timer:
+  // Ensures the window and child surface are shown even if SetNextFrameCallback
+  // does not trigger promptly on low-spec systems without DWM compositing.
+  ::SetTimer(GetHandle(), 1, 800, nullptr);
+
   return true;
 }
 
@@ -494,6 +499,17 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (message == WM_TIMER && wparam == 1) {
+    ::KillTimer(hwnd, 1);
+    if (!launch_to_tray_ && !IsWindowVisible(hwnd)) {
+      this->Show();
+      if (flutter_controller_) {
+        flutter_controller_->ForceRedraw();
+      }
+    }
+    return 0;
+  }
+
   if (message == WM_CLOSE && !is_exiting_) {
     HideMainWindow();
     return 0;
@@ -673,9 +689,13 @@ void FlutterWindow::NotifyTrayAction(const std::string& action) {
 
 void FlutterWindow::ShowMainWindow() {
   const auto handle = GetHandle();
+  this->Show();
   ShowWindow(handle, SW_RESTORE);
   ShowWindow(handle, SW_SHOWNORMAL);
   SetForegroundWindow(handle);
+  if (flutter_controller_) {
+    flutter_controller_->ForceRedraw();
+  }
   NotifyWindowStateChanged();
 }
 

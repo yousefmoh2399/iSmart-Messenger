@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const lastMessageSchema = new mongoose.Schema(
   {
+    id: { type: mongoose.Schema.Types.ObjectId, ref: "Message", default: null },
     content: { type: String, default: "" },
     senderId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     senderName: { type: String, default: "" },
@@ -9,6 +10,25 @@ const lastMessageSchema = new mongoose.Schema(
       type: String,
       enum: ["text", "file", "image", "pdf", "audio", "system", "poll", "gif", "checklist"],
       default: "text",
+    },
+    seenBy: [
+      {
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        at: { type: Date, default: Date.now },
+        _id: false,
+      },
+    ],
+    deliveredTo: [
+      {
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        at: { type: Date, default: Date.now },
+        _id: false,
+      },
+    ],
+    status: {
+      type: String,
+      enum: ["sending", "pending", "sent", "delivered", "read", "failed"],
+      default: "sent",
     },
     createdAt: { type: Date, default: null },
   },
@@ -46,6 +66,10 @@ const conversationSchema = new mongoose.Schema(
       default: "",
       trim: true,
       maxlength: 500,
+    },
+    avatarUrl: {
+      type: String,
+      default: null,
     },
     departmentId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -119,6 +143,9 @@ const conversationSchema = new mongoose.Schema(
 
 conversationSchema.index({ type: 1, departmentId: 1 });
 conversationSchema.index({ members: 1, updatedAt: -1 });
+conversationSchema.index({ createdBy: 1, deletedAt: 1 });
+conversationSchema.index({ admins: 1, deletedAt: 1 });
+conversationSchema.index({ broadcastPublisherIds: 1, deletedAt: 1 });
 conversationSchema.index({ type: 1, directKey: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model("Conversation", conversationSchema);

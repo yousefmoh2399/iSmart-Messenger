@@ -19,6 +19,8 @@ class ManagedUpdateRelease {
     required this.minWindowsBuild,
     required this.rolloutPercentage,
     required this.silentInstallArgs,
+    this.targetType = 'job_only',
+    this.targetBranches = const [],
     required this.checksumSha256,
     required this.fileName,
     required this.fileSize,
@@ -45,6 +47,8 @@ class ManagedUpdateRelease {
   final String? minWindowsBuild;
   final int rolloutPercentage;
   final String silentInstallArgs;
+  final String targetType;
+  final List<String> targetBranches;
   final String? checksumSha256;
   final String? fileName;
   final int fileSize;
@@ -75,6 +79,10 @@ class ManagedUpdateRelease {
           ? json['rolloutPercentage'] as int
           : int.tryParse(json['rolloutPercentage']?.toString() ?? '') ?? 100,
       silentInstallArgs: json['silentInstallArgs']?.toString() ?? '',
+      targetType: json['targetType']?.toString() ?? 'job_only',
+      targetBranches: (json['targetBranches'] as List<dynamic>? ?? const <dynamic>[])
+          .map((e) => e.toString())
+          .toList(),
       checksumSha256: json['checksumSha256']?.toString(),
       fileName: json['fileName']?.toString(),
       fileSize: json['fileSize'] is int
@@ -296,22 +304,28 @@ class DeviceHeartbeatResponse {
   const DeviceHeartbeatResponse({
     required this.pendingTasks,
     required this.heartbeatIntervalSeconds,
+    this.latestRelease,
   });
 
   final List<PendingUpdateTask> pendingTasks;
   final int heartbeatIntervalSeconds;
+  final ManagedUpdateRelease? latestRelease;
 
   factory DeviceHeartbeatResponse.fromJson(Map<String, dynamic> json) {
     final tasks = (json['pendingTasks'] as List<dynamic>? ?? const <dynamic>[])
         .whereType<Map<String, dynamic>>()
         .map(PendingUpdateTask.fromJson)
         .toList();
+    final latestReleaseRaw = json['latestRelease'];
     return DeviceHeartbeatResponse(
       pendingTasks: tasks,
       heartbeatIntervalSeconds: json['heartbeatIntervalSeconds'] is int
           ? json['heartbeatIntervalSeconds'] as int
           : int.tryParse(json['heartbeatIntervalSeconds']?.toString() ?? '') ??
                 30,
+      latestRelease: latestReleaseRaw is Map<String, dynamic>
+          ? ManagedUpdateRelease.fromJson(latestReleaseRaw)
+          : null,
     );
   }
 }

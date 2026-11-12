@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:math';
+import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -17,6 +19,7 @@ import '../features/auth/presentation/auth_controller.dart';
 import '../features/auth/presentation/login_screen.dart';
 import '../features/chat/data/chat_socket_service.dart';
 import '../features/profile/presentation/profile_screen.dart';
+import '../features/updates/presentation/update_center_screen.dart';
 import '../shared/providers/providers.dart';
 import '../shared/services/desktop_update_agent.dart'
     if (dart.library.html) '../shared/services/desktop_update_agent_web.dart';
@@ -26,6 +29,18 @@ import '../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../shared/widgets/loading_indicator.dart';
 import 'desktop_workspace_shell.dart';
 
+
+class AppDesktopScrollBehavior extends MaterialScrollBehavior {
+  const AppDesktopScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+      };
+}
 
 class WorkplaceDesktopApp extends ConsumerWidget {
   const WorkplaceDesktopApp({super.key});
@@ -46,6 +61,7 @@ class WorkplaceDesktopApp extends ConsumerWidget {
     unawaited(web_bridge.setElectronWindowTheme(effectiveWindowTheme));
 
     return MaterialApp(
+      scrollBehavior: const AppDesktopScrollBehavior(),
       debugShowCheckedModeBanner: false,
       title: "iSmart Messenger",
       locale: const Locale('ar'),
@@ -132,10 +148,17 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   String? _lastConnectionErrorMessage;
   bool _serverRefreshInFlight = false;
   bool _hasConfirmedServerDisconnect = false;
+  bool _isServerRecoveryBarDismissed = false;
+  bool _isServerTopBannerDismissed = false;
   bool _serverRestoreRefreshInFlight = false;
   int _serverFailureStreak = 0;
   bool _lastKnownWindowVisible = true;
   bool _lastKnownWindowMinimized = false;
+  // Throttle: last time we fired a health-ping from updates_updated event
+  DateTime? _lastUpdatesRefreshAt;
+  Timer? _updatesCheckTimer;
+  String? _lastNotifiedUpdateVersion;
+  Timer? _updateBannerAutoDismissTimer;
 
   // Event-driven connection flag.
   // True while the app is still establishing/re-establishing its connection.
@@ -154,9 +177,14 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.maybeOf(
-        context,
-      )?.showSnackBar(SnackBar(content: Text(error.toString())));
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger?.hideCurrentSnackBar();
+      messenger?.showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 4),
+          content: Text(error.toString()),
+        ),
+      );
     }
   }
 
@@ -167,9 +195,14 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.maybeOf(
-        context,
-      )?.showSnackBar(SnackBar(content: Text(error.toString())));
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger?.hideCurrentSnackBar();
+      messenger?.showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 4),
+          content: Text(error.toString()),
+        ),
+      );
     }
   }
 
@@ -212,6 +245,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       }
 
       _setChatVisibility(isChatVisible);
+      ref.read(chatAppForegroundProvider.notifier).state = isForeground;
 
       if (!updatePresence) {
         return;
@@ -236,6 +270,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       _updateAgentUserId = null;
       _isEstablishingConnection = true;
       _connectionEstablishTimer?.cancel();
+      _updatesCheckTimer?.cancel();
       _isUpdateInProgress = false;
       _isUpdateDialogMinimized = false;
       _isPendingRestart = false;
@@ -250,6 +285,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       _setTrayStatus('offline');
       _setChatVisibility(false);
       ref.read(chatSocketServiceProvider).disconnect();
+      unawaited(web_bridge.setTaskbarBadgeCount(0));
       return;
     }
 
@@ -259,6 +295,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         _lastPresenceUserId = user.id;
         unawaited(_syncWindowVisibilityState());
       }
+      ref.read(desktopUpdateAgentProvider).attachUser(user);
       if (_updateAgentUserId != user.id) {
         _updateAgentUserId = user.id;
         if (_hasDesktopCapabilities) {
@@ -275,18 +312,25 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _syncAdminServerDefaults() async {
+    if (!mounted) return;
     try {
-      final defaults = await ref
-          .read(appSettingsServiceProvider)
-          .fetchDefaults();
+      final currentBaseUrl = ref.read(apiBaseUrlControllerProvider).valueOrNull;
+      final appSettingsService = ref.read(appSettingsServiceProvider);
+      final apiBaseUrlCtrl = ref.read(apiBaseUrlControllerProvider.notifier);
+      final serverConnCtrl = ref.read(
+        serverConnectionControllerProvider.notifier,
+      );
+      final defaults = await appSettingsService.fetchDefaults();
       final desktopUrl = defaults.desktopBaseUrl?.trim();
-      if (desktopUrl == null || desktopUrl.isEmpty) {
+      if (desktopUrl == null || desktopUrl.isEmpty || !mounted) {
         return;
       }
-      await ref
-          .read(apiBaseUrlControllerProvider.notifier)
-          .applyAdminDefault(desktopUrl);
-      await ref.read(serverConnectionControllerProvider.notifier).refresh();
+      await apiBaseUrlCtrl.applyAdminDefault(desktopUrl);
+      if (!mounted) return;
+      final nextBaseUrl = ref.read(apiBaseUrlControllerProvider).valueOrNull;
+      if (nextBaseUrl != currentBaseUrl) {
+        await serverConnCtrl.refresh();
+      }
     } catch (_) {}
   }
 
@@ -342,10 +386,6 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       if (_serverFailureStreak >= 2) {
         _hasConfirmedServerDisconnect = true;
         setState(() {});
-        _showConnectionSnackBar(
-          _buildServerUnavailableMessage(result.message),
-          isError: true,
-        );
       }
       return;
     }
@@ -354,10 +394,11 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     if (_hasConfirmedServerDisconnect) {
       if (quiet || !recoverVisibleDisconnect) {
         _hasConfirmedServerDisconnect = false;
+        _isServerRecoveryBarDismissed = false;
+        _isServerTopBannerDismissed = false;
         _lastConnectionErrorMessage = null;
       } else {
         unawaited(_refreshDataAfterServerRestored());
-        _showConnectionSnackBar('تمت استعادة الاتصال بالخادم.', isError: false);
       }
     } else if (_lastConnectionErrorMessage != null) {
       // A transient/minimized-window probe failed earlier. Clear the stale
@@ -365,24 +406,34 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       _lastConnectionErrorMessage = null;
     }
     _hasConfirmedServerDisconnect = false;
+    _isServerRecoveryBarDismissed = false;
+    _isServerTopBannerDismissed = false;
     _lastConnectionErrorMessage = null;
     _serverFailureStreak = 0;
     setState(() {});
   }
 
   Future<void> _refreshDataAfterServerRestored() async {
-    if (_serverRestoreRefreshInFlight) {
+    if (_serverRestoreRefreshInFlight || !mounted) {
       return;
     }
     _serverRestoreRefreshInFlight = true;
     try {
-      ref.read(serverRecoveryRevisionProvider.notifier).state++;
       ref.invalidate(chatSocketConnectionProvider);
       try {
         await ref.read(authControllerProvider.notifier).refreshCurrentUser();
       } catch (_) {}
       if (!mounted) {
         return;
+      }
+      try {
+        ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
+      } catch (_) {}
+      final activeConversationId = ref.read(activeConversationIdProvider);
+      if (activeConversationId != null && activeConversationId.isNotEmpty) {
+        try {
+          ref.read(conversationMessagesControllerProvider(activeConversationId).notifier).refresh();
+        } catch (_) {}
       }
       unawaited(_ensureLanTransferServiceRunning());
     } finally {
@@ -425,13 +476,24 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _retryServerConnection() async {
+    if (!mounted) return;
     try {
       await ref.read(serverConnectionControllerProvider.notifier).refresh();
-      ref.read(serverRecoveryRevisionProvider.notifier).state++;
+      if (!mounted) return;
       ref.invalidate(chatSocketConnectionProvider);
       try {
         await ref.read(authControllerProvider.notifier).refreshCurrentUser();
       } catch (_) {}
+      if (!mounted) return;
+      try {
+        ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
+      } catch (_) {}
+      final activeConversationId = ref.read(activeConversationIdProvider);
+      if (activeConversationId != null && activeConversationId.isNotEmpty) {
+        try {
+          ref.read(conversationMessagesControllerProvider(activeConversationId).notifier).refresh();
+        } catch (_) {}
+      }
     } catch (_) {}
   }
 
@@ -439,40 +501,12 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     final currentBaseUrl =
         ref.read(apiBaseUrlControllerProvider).valueOrNull ??
         AppConfig.defaultApiBaseUrl;
-    final controller = TextEditingController(text: currentBaseUrl);
     final result = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('تغيير رابط الخادم'),
-        content: SizedBox(
-          width: 460,
-          child: TextField(
-            controller: controller,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'API Base URL',
-              hintText: 'http://192.168.1.10:5000',
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop('__reset__'),
-            child: const Text('الافتراضي'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(controller.text.trim()),
-            child: const Text('حفظ ومحاولة الاتصال'),
-          ),
-        ],
+      builder: (dialogContext) => _DesktopChangeServerBaseUrlDialog(
+        initialUrl: currentBaseUrl,
       ),
     );
-    controller.dispose();
     if (!mounted || result == null) {
       return;
     }
@@ -485,7 +519,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       return;
     }
 
+    if (!mounted) return;
     await ref.read(authRepositoryProvider).clearLocalSessionForServerChange();
+    if (!mounted) return;
     ref.read(serverRecoveryRevisionProvider.notifier).state++;
     ref.invalidate(authControllerProvider);
     ref.invalidate(documentsControllerProvider);
@@ -528,6 +564,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
 
   @override
   void dispose() {
+    _updateBannerAutoDismissTimer?.cancel();
+    _updatesCheckTimer?.cancel();
     _desktopEventsSubscription?.cancel();
     _updateAgentEventsSubscription?.cancel();
     _lanIncomingSubscription?.cancel();
@@ -629,7 +667,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
           children: [
             const DesktopWorkspaceShell(),
             const GlobalAnnouncementOverlay(),
-            if (showServerBanner)
+            if (showServerBanner && !_isServerTopBannerDismissed)
               Positioned(
                 top: 12,
                 left: 12,
@@ -640,16 +678,59 @@ class _AuthGateState extends ConsumerState<_AuthGate>
                     message: _buildServerUnavailableMessage(
                       serverConnection.message,
                     ),
+                    onDismiss: () {
+                      setState(() => _isServerTopBannerDismissed = true);
+                    },
                   ),
                 ),
               ),
-            if (showServerBanner)
+            if (showServerBanner && !_isServerRecoveryBarDismissed)
               _ServerRecoveryBar(
                 message: _buildServerUnavailableMessage(
                   serverConnection.message,
                 ),
                 onRetry: _retryServerConnection,
                 onChangeServer: _changeServerBaseUrl,
+                onDismiss: () {
+                  setState(() => _isServerRecoveryBarDismissed = true);
+                },
+              ),
+            if (showServerBanner && _isServerRecoveryBarDismissed)
+              PositionedDirectional(
+                start: 16,
+                bottom: 12,
+                child: SafeArea(
+                  top: false,
+                  child: Material(
+                    elevation: 6,
+                    color: const Color(0xFF7F1D1D),
+                    borderRadius: BorderRadius.circular(20),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: () {
+                        setState(() => _isServerRecoveryBarDismissed = false);
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(Icons.cloud_off_rounded, size: 14, color: Colors.white),
+                            SizedBox(width: 6),
+                            Text(
+                              'السيرفر غير متصل (انقر للخيارات)',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
             if (_isUpdateInProgress && !_isUpdateDialogMinimized)
               _UpdateProgressOverlay(
@@ -671,6 +752,13 @@ class _AuthGateState extends ConsumerState<_AuthGate>
                   isPendingRestart: _isPendingRestart,
                   onTap: () {
                     setState(() => _isUpdateDialogMinimized = false);
+                  },
+                  onDismiss: () {
+                    _updateBannerAutoDismissTimer?.cancel();
+                    setState(() {
+                      _isUpdateInProgress = false;
+                      _isUpdateDialogMinimized = false;
+                    });
                   },
                   onRestartNow: _isPendingRestart
                       ? _restartPreparedUpdate
@@ -748,6 +836,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     }
 
     _setChatVisibility(isChatVisible);
+    ref.read(chatAppForegroundProvider.notifier).state = isForeground;
     _setPresenceStatus(isChatVisible && isForeground ? 'online' : 'idle');
 
     return null;
@@ -835,14 +924,12 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         _markConnectionEstablished();
         if (_hasConfirmedServerDisconnect && recoverOnSocketConnected) {
           unawaited(_refreshDataAfterServerRestored());
-          _showConnectionSnackBar(
-            'تمت استعادة الاتصال بالخادم.',
-            isError: false,
-          );
         } else if (_lastConnectionErrorMessage != null) {
           _lastConnectionErrorMessage = null;
         }
         _hasConfirmedServerDisconnect = false;
+        _isServerRecoveryBarDismissed = false;
+        _isServerTopBannerDismissed = false;
         _lastConnectionErrorMessage = null;
         _serverFailureStreak = 0;
         setState(() {});
@@ -864,9 +951,25 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         return;
       }
       if (event.type == 'updates_updated') {
-        unawaited(_refreshServerConnectionState());
+        final action = (event.payload['action'] ?? '').toString().trim();
+        if (action == 'telemetry') {
+          return;
+        }
+        // Debounce: skip health-ping if we refreshed within the last 8 seconds
+        final now = DateTime.now();
+        if (_lastUpdatesRefreshAt == null ||
+            now.difference(_lastUpdatesRefreshAt!).inSeconds >= 8) {
+          _lastUpdatesRefreshAt = now;
+          unawaited(_refreshServerConnectionState());
+        }
         if (!kIsWeb || web_bridge.isElectron()) {
-          unawaited(ref.read(desktopUpdateAgentProvider).checkNow());
+          _updatesCheckTimer?.cancel();
+          final jitterMs = 1000 + Random().nextInt(5001);
+          _updatesCheckTimer = Timer(Duration(milliseconds: jitterMs), () {
+            if (!mounted) return;
+            if (ref.read(currentUserProvider) == null) return;
+            unawaited(ref.read(desktopUpdateAgentProvider).checkNow());
+          });
         }
         return;
       }
@@ -903,6 +1006,69 @@ class _AuthGateState extends ConsumerState<_AuthGate>
           if (!mounted) {
             return;
           }
+          final messenger = ScaffoldMessenger.maybeOf(context);
+          if (event.type == 'update_available') {
+            if (_lastNotifiedUpdateVersion == event.version) {
+              return;
+            }
+            _lastNotifiedUpdateVersion = event.version;
+            messenger?.hideCurrentSnackBar();
+            messenger?.showSnackBar(
+              SnackBar(
+                backgroundColor: const Color(0xFF1E293B),
+                duration: const Duration(seconds: 5),
+                behavior: SnackBarBehavior.floating,
+                dismissDirection: DismissDirection.horizontal,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                content: Row(
+                  children: [
+                    const Icon(Icons.system_update_rounded, color: Color(0xFF38BDF8), size: 22),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        event.message,
+                        style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white70, size: 18),
+                      tooltip: 'إغلاق',
+                      onPressed: () {
+                        ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
+                      },
+                    ),
+                  ],
+                ),
+                action: SnackBarAction(
+                  label: 'عرض التحديث',
+                  textColor: const Color(0xFF38BDF8),
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const UpdateCenterScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            );
+            return;
+          }
+          if (event.type == 'clear') {
+            _lastNotifiedUpdateVersion = null;
+            _updateBannerAutoDismissTimer?.cancel();
+            messenger?.hideCurrentSnackBar();
+            setState(() {
+              _isUpdateInProgress = false;
+              _isUpdateDialogMinimized = false;
+              _isPendingRestart = false;
+              _updateStatusMessage = '';
+              _updateProgress = 0;
+            });
+            return;
+          }
           if (event.type == 'status') {
             setState(() {
               _isUpdateInProgress = true;
@@ -919,24 +1085,60 @@ class _AuthGateState extends ConsumerState<_AuthGate>
               _updateStatusMessage = event.message;
               _updateProgress = event.progress ?? 100;
             });
-            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            messenger?.hideCurrentSnackBar();
+            messenger?.showSnackBar(
               SnackBar(
-                content: Text(
-                  event.message.isEmpty
-                      ? 'اكتمل تنزيل التحديث. يمكنك إعادة تشغيل التطبيق عندما يناسبك.'
-                      : event.message,
+                backgroundColor: const Color(0xFF0F172A),
+                duration: const Duration(seconds: 5),
+                behavior: SnackBarBehavior.floating,
+                dismissDirection: DismissDirection.horizontal,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                content: Row(
+                  children: [
+                    const Icon(Icons.restart_alt_rounded, color: Color(0xFF4ADE80), size: 22),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        event.message.isEmpty
+                            ? 'اكتمل تنزيل التحديث. يمكنك إعادة تشغيل التطبيق عندما يناسبك.'
+                            : event.message,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white70, size: 18),
+                      tooltip: 'إغلاق',
+                      onPressed: () {
+                        ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
+                      },
+                    ),
+                  ],
                 ),
                 action: SnackBarAction(
                   label: 'إعادة التشغيل',
+                  textColor: const Color(0xFF4ADE80),
                   onPressed: () {
                     unawaited(_restartPreparedUpdate());
                   },
                 ),
               ),
             );
+            // Auto-dismiss the floating corner banner after 10s so it doesn't stay stuck
+            _updateBannerAutoDismissTimer?.cancel();
+            _updateBannerAutoDismissTimer = Timer(const Duration(seconds: 10), () {
+              if (mounted && _isPendingRestart) {
+                setState(() {
+                  _isUpdateInProgress = false;
+                });
+              }
+            });
             return;
           }
           if (event.type == 'completed') {
+            _updateBannerAutoDismissTimer?.cancel();
+            messenger?.hideCurrentSnackBar();
             setState(() {
               _isUpdateInProgress = false;
               _isUpdateDialogMinimized = false;
@@ -944,8 +1146,11 @@ class _AuthGateState extends ConsumerState<_AuthGate>
               _updateStatusMessage = '';
               _updateProgress = 100;
             });
-            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            messenger?.showSnackBar(
               SnackBar(
+                duration: const Duration(seconds: 4),
+                behavior: SnackBarBehavior.floating,
+                dismissDirection: DismissDirection.horizontal,
                 content: Text(
                   event.message.isEmpty
                       ? 'تم تثبيت التحديث بنجاح.'
@@ -956,6 +1161,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
             return;
           }
           if (event.type == 'failed') {
+            _updateBannerAutoDismissTimer?.cancel();
+            messenger?.hideCurrentSnackBar();
             final message = event.message.trim();
             setState(() {
               _isUpdateInProgress = false;
@@ -964,8 +1171,11 @@ class _AuthGateState extends ConsumerState<_AuthGate>
               _updateStatusMessage = '';
               _updateProgress = 0;
             });
-            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            messenger?.showSnackBar(
               SnackBar(
+                duration: const Duration(seconds: 5),
+                behavior: SnackBarBehavior.floating,
+                dismissDirection: DismissDirection.horizontal,
                 content: Text(
                   message.isEmpty
                       ? 'فشل تحديث التطبيق.'
@@ -1002,16 +1212,22 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         return;
       }
       if (event.stage == 'completed') {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        messenger?.hideCurrentSnackBar();
+        messenger?.showSnackBar(
           SnackBar(
+            duration: const Duration(seconds: 4),
             content: Text(
               'تم استلام ${event.fileName} من ${event.peerIp ?? 'جهاز على الشبكة'} بنجاح.',
             ),
           ),
         );
       } else if (event.stage == 'failed') {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        messenger?.hideCurrentSnackBar();
+        messenger?.showSnackBar(
           SnackBar(
+            duration: const Duration(seconds: 4),
             content: Text(
               event.message?.trim().isNotEmpty == true
                   ? event.message!
@@ -1024,9 +1240,11 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _ensureLanTransferServiceRunning() async {
+    if (!mounted) return;
     try {
-      await ref.read(lanFileTransferServiceProvider).start();
-      await ref.read(lanFileTransferServiceProvider).refreshLocalIpv4s();
+      final lanService = ref.read(lanFileTransferServiceProvider);
+      await lanService.start();
+      await lanService.refreshLocalIpv4s();
     } catch (error) {
       if (!mounted) {
         return;
@@ -1123,11 +1341,12 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _publishPrinterCatalog() async {
+    if (!mounted) return;
     try {
-      final catalog = await ref
-          .read(desktopPrintServiceProvider)
-          .getPrinterCatalog();
-      await ref.read(chatSocketServiceProvider).emitWithAck('printers:update', {
+      final printService = ref.read(desktopPrintServiceProvider);
+      final socketService = ref.read(chatSocketServiceProvider);
+      final catalog = await printService.getPrinterCatalog();
+      await socketService.emitWithAck('printers:update', {
         'printers': catalog.printers,
         'defaultPrinter': catalog.defaultPrinter,
       });
@@ -1135,6 +1354,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _publishDesktopStorageConfig() async {
+    if (!mounted) return;
     try {
       final prefs = ref.read(userPreferencesControllerProvider).valueOrNull;
       await ref.read(chatSocketServiceProvider).emitWithAck(
@@ -1145,6 +1365,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _handlePrintJob(Map<String, dynamic> payload) async {
+    if (!mounted) return;
     final prefs = ref.read(userPreferencesControllerProvider).valueOrNull;
     final processor = ref.read(printJobProcessorProvider);
     final result = await processor.process(
@@ -1173,7 +1394,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _handleFileSaveJob(Map<String, dynamic> payload) async {
+    if (!mounted) return;
     final prefs = ref.read(userPreferencesControllerProvider).valueOrNull;
+    final socketService = ref.read(chatSocketServiceProvider);
     final preferredDirectoryPath = _preferredDirectoryForFileSave(
       payload,
       prefs,
@@ -1190,20 +1413,18 @@ class _AuthGateState extends ConsumerState<_AuthGate>
                 required String message,
                 String? savedPath,
               }) {
-                ref
-                    .read(chatSocketServiceProvider)
-                    .emitEvent('file_save_progress', {
-                      'jobId': payload['jobId']?.toString(),
-                      'stage': stage,
-                      'progress': progress,
-                      'message': message,
-                      if (savedPath != null && savedPath.trim().isNotEmpty)
-                        'savedPath': savedPath,
-                    });
+                socketService.emitEvent('file_save_progress', {
+                  'jobId': payload['jobId']?.toString(),
+                  'stage': stage,
+                  'progress': progress,
+                  'message': message,
+                  if (savedPath != null && savedPath.trim().isNotEmpty)
+                    'savedPath': savedPath,
+                });
               },
         );
 
-    ref.read(chatSocketServiceProvider).emitEvent('file_save_result', {
+    socketService.emitEvent('file_save_result', {
       'jobId': payload['jobId']?.toString(),
       'success': result.success,
       'message': result.message,
@@ -1237,10 +1458,6 @@ class _AuthGateState extends ConsumerState<_AuthGate>
 
     if (isScanPdf && prefs?.scanSaveDirectoryPath?.trim().isNotEmpty == true) {
       return prefs!.scanSaveDirectoryPath!.trim();
-    }
-
-    if (prefs?.localStorageDirectoryPath?.trim().isNotEmpty == true) {
-      return prefs!.localStorageDirectoryPath!.trim();
     }
 
     return null;
@@ -1397,9 +1614,13 @@ class _UpdateProgressOverlay extends StatelessWidget {
 }
 
 class _ServerStatusBanner extends StatelessWidget {
-  const _ServerStatusBanner({required this.message});
+  const _ServerStatusBanner({
+    required this.message,
+    this.onDismiss,
+  });
 
   final String message;
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -1408,10 +1629,10 @@ class _ServerStatusBanner extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       color: const Color(0xFFB42318),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Row(
           children: [
-            const Icon(Iconsax.cloud, color: Colors.white),
+            const Icon(Iconsax.cloud, color: Colors.white, size: 20),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -1419,9 +1640,19 @@ class _ServerStatusBanner extends StatelessWidget {
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Colors.white,
                   fontWeight: FontWeight.w600,
+                  fontSize: 13,
                 ),
               ),
             ),
+            if (onDismiss != null)
+              IconButton(
+                tooltip: 'إخفاء التنبيه',
+                iconSize: 18,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                onPressed: onDismiss,
+              ),
           ],
         ),
       ),
@@ -1434,11 +1665,13 @@ class _ServerRecoveryBar extends StatelessWidget {
     required this.message,
     required this.onRetry,
     required this.onChangeServer,
+    this.onDismiss,
   });
 
   final String message;
   final VoidCallback onRetry;
   final VoidCallback onChangeServer;
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -1451,12 +1684,12 @@ class _ServerRecoveryBar extends StatelessWidget {
         child: Material(
           elevation: 14,
           color: const Color(0xFF7F1D1D),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(
               children: [
-                const Icon(Iconsax.cloud_cross, color: Colors.white),
+                const Icon(Iconsax.cloud_cross, color: Colors.white, size: 22),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -1466,6 +1699,7 @@ class _ServerRecoveryBar extends StatelessWidget {
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.w700,
+                      fontSize: 13,
                     ),
                   ),
                 ),
@@ -1475,8 +1709,9 @@ class _ServerRecoveryBar extends StatelessWidget {
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.white,
                     side: const BorderSide(color: Colors.white54),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   ),
-                  icon: const Icon(Icons.settings_ethernet, size: 18),
+                  icon: const Icon(Icons.settings_ethernet, size: 16),
                   label: const Text('تغيير الرابط'),
                 ),
                 const SizedBox(width: 8),
@@ -1485,10 +1720,24 @@ class _ServerRecoveryBar extends StatelessWidget {
                   style: FilledButton.styleFrom(
                     backgroundColor: Colors.white,
                     foregroundColor: const Color(0xFF7F1D1D),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   ),
-                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  icon: const Icon(Icons.refresh_rounded, size: 16),
                   label: const Text('إعادة الاتصال'),
                 ),
+                if (onDismiss != null) ...[
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: onDismiss,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white38),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    label: const Text('إخفاء'),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1557,6 +1806,7 @@ class _UpdateProgressBanner extends StatelessWidget {
     required this.isPendingRestart,
     required this.onTap,
     required this.onRestartNow,
+    this.onDismiss,
   });
 
   final String message;
@@ -1564,6 +1814,7 @@ class _UpdateProgressBanner extends StatelessWidget {
   final bool isPendingRestart;
   final VoidCallback onTap;
   final VoidCallback? onRestartNow;
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -1622,6 +1873,21 @@ class _UpdateProgressBanner extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    if (onDismiss != null)
+                      Tooltip(
+                        message: 'إغلاق الإشعار',
+                        child: GestureDetector(
+                          onTap: onDismiss,
+                          child: const Padding(
+                            padding: EdgeInsets.only(left: 4),
+                            child: Icon(
+                              Icons.close_rounded,
+                              color: Colors.white70,
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 6),
@@ -1979,6 +2245,67 @@ class _GlobalAnnouncementOverlayState
           ),
         );
       },
+    );
+  }
+}
+
+
+class _DesktopChangeServerBaseUrlDialog extends StatefulWidget {
+  const _DesktopChangeServerBaseUrlDialog({required this.initialUrl});
+
+  final String initialUrl;
+
+  @override
+  State<_DesktopChangeServerBaseUrlDialog> createState() =>
+      _DesktopChangeServerBaseUrlDialogState();
+}
+
+class _DesktopChangeServerBaseUrlDialogState
+    extends State<_DesktopChangeServerBaseUrlDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialUrl);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('تغيير رابط الخادم'),
+      content: SizedBox(
+        width: 460,
+        child: TextField(
+          controller: _controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'API Base URL',
+            hintText: 'http://192.168.1.10:5000',
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop('__reset__'),
+          child: const Text('الافتراضي'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('إلغاء'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.of(context).pop(_controller.text.trim()),
+          child: const Text('حفظ ومحاولة الاتصال'),
+        ),
+      ],
     );
   }
 }

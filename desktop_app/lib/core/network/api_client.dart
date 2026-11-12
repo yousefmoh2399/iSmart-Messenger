@@ -16,7 +16,7 @@ class ApiClient {
     : dio = Dio(
         BaseOptions(
           baseUrl: baseUrl,
-          connectTimeout: const Duration(seconds: 8),
+          connectTimeout: const Duration(seconds: 25),
           receiveTimeout: const Duration(minutes: 10),
           sendTimeout: kIsWeb ? null : const Duration(minutes: 10),
         ),
@@ -80,27 +80,52 @@ class ApiClient {
           final retryCount = (options.extra['authRetryCount'] as int?) ?? 0;
           final gen = options.extra['tokenGenerationUsed'] ?? 'null';
 
-          debugPrint(
-            '[API]\n'
-            'time=$time\n'
-            'source=$source\n'
-            '${options.method} ${options.path}\n'
-            'auth=$hasAuth\n'
-            'token=$tokenFingerprint\n'
-            'generation=$gen\n'
-            'authRetryCount=$retryCount',
-          );
+          if (kDebugMode) {
+            debugPrint(
+              '[API]\n'
+              'time=$time\n'
+              'source=$source\n'
+              '${options.method} ${options.path}\n'
+              'auth=$hasAuth\n'
+              'token=$tokenFingerprint\n'
+              'generation=$gen\n'
+              'authRetryCount=$retryCount',
+            );
+          }
 
           final isTransferEndpoint =
+              options.data is FormData ||
+              options.extra['isTransfer'] == true ||
               requestPath.contains('/transfers') ||
               requestPath.contains('/upload') ||
               requestPath.contains('/download') ||
               requestPath.contains('/releases') ||
-              requestPath.contains('/updates');
-          if (!isTransferEndpoint) {
-            options.receiveTimeout = const Duration(seconds: 90);
+              requestPath.contains('/updates') ||
+              requestPath.contains('/chat/messages/') ||
+              requestPath.contains('/documents/');
+          final isFastEndpoint = requestPath.contains('/auth/login') ||
+              requestPath.contains('/auth/register') ||
+              requestPath.contains('/health');
+          if (isFastEndpoint) {
+            options.connectTimeout = const Duration(seconds: 15);
+            options.receiveTimeout = const Duration(seconds: 20);
             if (!kIsWeb) {
-              options.sendTimeout = const Duration(seconds: 90);
+              options.sendTimeout = const Duration(seconds: 20);
+            }
+          } else if (isTransferEndpoint) {
+            // Generous timeouts for large files, uploads, and downloads over slow branch VPNs
+            options.connectTimeout = const Duration(seconds: 45);
+            options.receiveTimeout = const Duration(minutes: 30);
+            if (!kIsWeb) {
+              options.sendTimeout = const Duration(minutes: 30);
+            }
+          } else {
+            // Bounded connect/receive/send timeouts for branch VPNs with high jitter
+            // so dead connections fail over to local cache promptly.
+            options.connectTimeout ??= const Duration(seconds: 15);
+            options.receiveTimeout = const Duration(seconds: 20);
+            if (!kIsWeb) {
+              options.sendTimeout = const Duration(seconds: 20);
             }
           }
 
@@ -159,10 +184,12 @@ class ApiClient {
             }
 
             try {
-              debugPrint(
-                '[API] 401 for ${requestOptions.path}; joining auth refresh '
-                'generation=$currentGeneration retryCount=$retryCount',
-              );
+              if (kDebugMode) {
+                debugPrint(
+                  '[API] 401 for ${requestOptions.path}; joining auth refresh '
+                  'generation=$currentGeneration retryCount=$retryCount',
+                );
+              }
               final refreshResult = await _sessionManager.refreshOnce();
               if (!_isReplayableRequestData(requestOptions.data)) {
                 handler.reject(_notReplayableDioError(requestOptions));
@@ -182,7 +209,8 @@ class ApiClient {
                   ? _sessionManager.mapRefreshFailure(refreshError)
                   : mapError(refreshError);
               final readable = _readableDioError(error, mapped);
-              if (requestOptions.extra['skipErrorLog'] != true) {
+              final isTempNetworkError = refreshError is RefreshNetworkException;
+              if (requestOptions.extra['skipErrorLog'] != true && !isTempNetworkError) {
                 unawaited(
                   AppErrorLogService.instance.recordDioException(
                     readable,
@@ -195,8 +223,47 @@ class ApiClient {
             }
           }
 
+          // Transient network failure auto-retry (especially for branch VPN packet drops and latency spikes).
+          // Keep 503 out of automatic retry so backend backpressure queue/rate-limit signals work properly.
+          final isTransientNetworkError =
+              error.type == DioExceptionType.connectionTimeout ||
+              error.type == DioExceptionType.connectionError ||
+              error.type == DioExceptionType.sendTimeout ||
+              (statusCode != null &&
+                  (statusCode == 502 || statusCode == 504));
+          final isIdempotentMethod =
+              requestOptions.method.toUpperCase() == 'GET' ||
+              requestOptions.method.toUpperCase() == 'HEAD' ||
+              requestOptions.extra['allowRetry'] == true;
+          final networkRetryCount =
+              (requestOptions.extra['networkRetryCount'] as int?) ?? 0;
+
+          if (isTransientNetworkError &&
+              isIdempotentMethod &&
+              networkRetryCount < 1 &&
+              _isReplayableRequestData(requestOptions.data)) {
+            final retryDelay =
+                Duration(milliseconds: 600 * (networkRetryCount + 1));
+            if (kDebugMode) {
+              debugPrint(
+                '[API] Transient network error (${error.type}) on ${requestOptions.method} ${requestOptions.path}. Retrying attempt ${networkRetryCount + 1} after ${retryDelay.inMilliseconds}ms...',
+              );
+            }
+            await Future.delayed(retryDelay);
+            final retryOptions = _cloneRequestOptions(requestOptions);
+            retryOptions.extra['networkRetryCount'] = networkRetryCount + 1;
+            try {
+              handler.resolve(await dio.fetch(retryOptions));
+              return;
+            } catch (_) {
+              // If retry fails, fall through to normal error handling
+            }
+          }
+
           final readable = _readableDioError(error, mapError(error));
-          if (requestOptions.extra['skipErrorLog'] != true) {
+          final isCancelled = error.type == DioExceptionType.cancel ||
+              error.error is MissingAuthTokenException;
+          if (requestOptions.extra['skipErrorLog'] != true && !isCancelled) {
             unawaited(AppErrorLogService.instance.recordDioException(readable));
           }
           handler.reject(readable);
@@ -238,6 +305,7 @@ class ApiClient {
   bool _isPublicAuthPath(String requestPath) {
     return requestPath.contains('/api/auth/login') ||
         requestPath.contains('/api/auth/register') ||
+        requestPath.contains('/api/auth/logout') ||
         requestPath.contains('/api/auth/forgot-password') ||
         requestPath.contains('/api/auth/reset-password') ||
         requestPath.contains('/api/auth/refresh') ||
@@ -280,23 +348,28 @@ class ApiClient {
 
       final payload = error.response?.data;
       final statusCode = error.response?.statusCode;
-      final requestPath = error.requestOptions.path.toLowerCase();
-      final isLoginRequest = requestPath.contains('/api/auth/login');
 
       String? serverMessage;
       if (payload is Map<String, dynamic>) {
-        serverMessage =
+        if (payload['details'] is List) {
+          final detailsList = (payload['details'] as List)
+              .whereType<Map<String, dynamic>>()
+              .map((d) => (d['message'] ?? d['msg'])?.toString().trim())
+              .whereType<String>()
+              .where((m) => m.isNotEmpty)
+              .toList();
+          if (detailsList.isNotEmpty) {
+            serverMessage = detailsList.join('\n');
+          }
+        }
+        serverMessage ??=
             (payload['message'] as String?)?.trim() ??
             (payload['error'] as String?)?.trim();
       }
 
       if (statusCode == 401) {
-        final lower = serverMessage?.toLowerCase() ?? '';
-        if (isLoginRequest || lower.contains('invalid username or password')) {
-          return const ApiException(
-            'اسم المستخدم أو كلمة المرور غير صحيحة.',
-            statusCode: 401,
-          );
+        if (serverMessage != null && serverMessage.isNotEmpty) {
+          return ApiException(serverMessage, statusCode: 401);
         }
         return const ApiException(
           'انتهت صلاحية الجلسة أو فشل التحقق. سجل الدخول مرة أخرى.',
@@ -340,6 +413,18 @@ class ApiClient {
           error.type == DioExceptionType.receiveTimeout ||
           error.type == DioExceptionType.sendTimeout ||
           error.type == DioExceptionType.connectionError) {
+        final reqPath = error.requestOptions.path.toLowerCase();
+        final isTransfer = error.requestOptions.extra['isTransfer'] == true ||
+            reqPath.contains('/download') ||
+            reqPath.contains('/upload') ||
+            reqPath.contains('/transfers') ||
+            reqPath.contains('/chat/messages/') ||
+            reqPath.contains('/documents/');
+        if (isTransfer) {
+          return const ApiException(
+            'فشل نقل الملف بسبب ضعف أو انقطاع شبكة الـ VPN. يرجى التحقق من الاتصال وإعادة المحاولة.',
+          );
+        }
         return const ApiException(
           'الخادم غير متاح حاليا. سيتم تحديث البيانات تلقائيا عند عودة الاتصال.',
         );

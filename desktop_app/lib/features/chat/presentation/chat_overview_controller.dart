@@ -1,10 +1,16 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:math';
+import 'package:path/path.dart' as p;
 
 import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../../../shared/providers/providers.dart';
+import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
+import '../data/chat_outbox_service.dart';
 import '../data/chat_repository.dart';
 import '../data/chat_socket_service.dart';
 import '../models/chat_models.dart';
@@ -12,16 +18,74 @@ import '../utils/chat_reaction_emoji_stats.dart';
 
 class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   StreamSubscription<ChatSocketEvent>? _eventsSubscription;
+  StreamSubscription<ChatOutboxEvent>? _outboxSubscription;
   ChatRepository? _chatRepository;
   ChatSocketService? _chatSocketService;
+  ChatOutboxService? _chatOutboxService;
   String _currentUserId = '';
   bool _disposed = false;
   int _usersPage = 1;
   bool _hasMoreUsers = false;
   bool _loadingMoreUsers = false;
+  final _processedIncomingMessageIds = <String>{};
+  // Throttle: last time socket_connected triggered a full refresh
+  DateTime? _lastSocketRefreshAt;
+  Future<void>? _refreshInFlight;
+  Timer? _directoryRefreshTimer;
+  Timer? _presenceBatchTimer;
+  final Map<
+    String,
+    ({
+      bool isOnline,
+      String presenceStatus,
+      DateTime? lastSeen,
+      DateTime? lastActiveAt,
+    })
+  >
+  _pendingPresenceUpdates = {};
+  static const Duration presenceBatchWindow = Duration(milliseconds: 250);
+
+  static ChatDirectoryUser _mergeChatDirectoryUsers(
+    ChatDirectoryUser primary,
+    ChatDirectoryUser fallback,
+  ) {
+    return primary.copyWith(
+      fullName: primary.fullName.trim().isNotEmpty
+          ? primary.fullName
+          : fallback.fullName,
+      username: primary.username.trim().isNotEmpty
+          ? primary.username
+          : fallback.username,
+      jobTitle: primary.jobTitle.trim().isNotEmpty
+          ? primary.jobTitle
+          : fallback.jobTitle,
+      departmentId: (primary.departmentId != null &&
+              primary.departmentId!.trim().isNotEmpty)
+          ? primary.departmentId
+          : fallback.departmentId,
+      departmentIds: primary.departmentIds.isNotEmpty
+          ? primary.departmentIds
+          : fallback.departmentIds,
+      branchId: (primary.branchId != null &&
+              primary.branchId!.trim().isNotEmpty)
+          ? primary.branchId
+          : fallback.branchId,
+      branchCode: (primary.branchCode.isNotEmpty &&
+              primary.branchCode.toLowerCase() != 'main')
+          ? primary.branchCode
+          : fallback.branchCode,
+      avatarUrl: primary.avatarUrl ?? fallback.avatarUrl,
+      isOnline: primary.isOnline || fallback.isOnline,
+      presenceStatus:
+          primary.isOnline ? primary.presenceStatus : fallback.presenceStatus,
+    );
+  }
 
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
+
+  ChatOutboxService _outbox() =>
+      _chatOutboxService ?? ref.read<ChatOutboxService>(chatOutboxServiceProvider);
 
   bool _isUnauthorized(Object error) {
     return error is ApiException && error.isUnauthorized;
@@ -40,28 +104,13 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     }
   }
 
-  Future<bool> _waitForAuthenticatedSession() async {
-    ref.watch(authCredentialsRevisionProvider);
-    final authUser = ref.watch(currentUserProvider);
-    if (authUser == null) {
-      return false;
-    }
-    final token = await ref.watch(authTokenProvider.future);
-    if (token == null ||
-        token.trim().isEmpty ||
-        token.trim().toLowerCase() == 'null') {
-      throw const ApiException(
-        'انتهت صلاحية الجلسة أو فشل التحقق. سجل الدخول مرة أخرى.',
-        statusCode: 401,
-      );
-    }
-    return true;
+  Future<bool> _waitForAuthenticatedSession({bool listen = false}) {
+    return waitForAuthenticatedSession(ref, listen: listen);
   }
 
   @override
   Future<ChatOverviewData> build() async {
-    ref.watch(serverRecoveryRevisionProvider);
-    final hasSession = await _waitForAuthenticatedSession();
+    final hasSession = await _waitForAuthenticatedSession(listen: true);
     if (!hasSession) {
       return const ChatOverviewData(
         conversations: [],
@@ -78,18 +127,25 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     unawaited(ref.read(chatSocketConnectionProvider.future));
     _chatRepository = ref.read(chatRepositoryProvider);
     _chatSocketService = ref.read(chatSocketServiceProvider);
+    _chatOutboxService = ref.read(chatOutboxServiceProvider);
     _currentUserId = ref.read(authControllerProvider).valueOrNull?.id ?? '';
     _disposed = false;
     _listenToSocket();
+    _listenToOutbox();
     ref.onDispose(() {
       _disposed = true;
+      _overviewCacheDebounceTimer?.cancel();
+      _directoryRefreshTimer?.cancel();
+      _presenceBatchTimer?.cancel();
+      _pendingPresenceUpdates.clear();
       _eventsSubscription?.cancel();
+      _outboxSubscription?.cancel();
     });
     return _loadOverview();
   }
 
-  Future<ChatOverviewData> _loadOverview() async {
-    final hasSession = await _waitForAuthenticatedSession();
+  Future<ChatOverviewData> _loadOverview({bool forceNetwork = false}) async {
+    final hasSession = await _waitForAuthenticatedSession(listen: false);
     if (!hasSession) {
       return const ChatOverviewData(
         conversations: [],
@@ -101,7 +157,43 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       );
     }
     final repository = _repository();
-    final conversations = await _guardAuth(repository.fetchConversations);
+
+    if (!forceNetwork) {
+      final cachedConversations = await repository.cache.loadConversations();
+      if (cachedConversations != null && cachedConversations.isNotEmpty) {
+        final cachedDepartments = await repository.cache.loadDepartments() ?? const [];
+        final cachedBranches = await repository.cache.loadBranches() ?? const [];
+        final cachedUsers = await repository.cache.loadUsers() ?? const [];
+
+        // Stale-While-Revalidate: Return cached overview immediately so the UI is responsive
+        // (<50ms) even over high-latency branch VPNs, and trigger a fresh network fetch in the background.
+        _lastSocketRefreshAt = DateTime.now();
+        unawaited(Future.microtask(() async {
+          if (_disposed) return;
+          try {
+            final fresh = await _loadOverview(forceNetwork: true);
+            if (!_disposed) {
+              _setStateAndCache(fresh);
+            }
+          } catch (_) {}
+        }));
+
+        final sortedCached = _sortConversations(cachedConversations);
+        final manageableCached = _sortConversations(
+          cachedConversations.where((c) => c.type != 'direct').toList(),
+        );
+
+        return ChatOverviewData(
+          conversations: sortedCached,
+          manageableConversations: manageableCached,
+          users: cachedUsers,
+          departments: cachedDepartments,
+          branches: cachedBranches,
+          roles: const [],
+        );
+      }
+    }
+
     Future<List<T>> safeList<T>(Future<List<T>> Function() loader) async {
       try {
         return await _guardAuth(loader);
@@ -113,37 +205,204 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       }
     }
 
-    late ChatDirectoryUsersPage usersPage;
-    try {
-      usersPage = await _guardAuth(repository.fetchUsersPage);
-    } catch (error) {
-      if (_isUnauthorized(error)) rethrow;
-      usersPage = const ChatDirectoryUsersPage(
-        users: [],
-        page: 1,
-        hasMore: false,
-        limit: 40,
-      );
+    Future<List<ChatDirectoryUser>> loadAllUsers() async {
+      final collectedUsers = <String, ChatDirectoryUser>{};
+      try {
+        var currentPage = 1;
+        var hasMore = true;
+        while (hasMore) {
+          final page = await _guardAuth(
+            () => repository.fetchUsersPage(page: currentPage, limit: 500),
+          );
+          for (final u in page.users) {
+            collectedUsers[u.id] = u;
+          }
+          _usersPage = page.page;
+          _hasMoreUsers = page.hasMore;
+          hasMore = page.hasMore && page.users.isNotEmpty;
+          currentPage++;
+          if (currentPage > 20) break;
+        }
+      } catch (error) {
+        if (_isUnauthorized(error)) rethrow;
+      }
+      return collectedUsers.values.toList();
     }
-    _usersPage = usersPage.page;
-    _hasMoreUsers = usersPage.hasMore;
 
-    final departments = await safeList(repository.fetchDepartments);
-    final branches = await safeList(repository.fetchBranches);
+    Future<List<DepartmentSummary>> loadDepartmentsWithCacheFallback() async {
+      final cached = await repository.cache.loadDepartments();
+      try {
+        final fresh = await _guardAuth(repository.fetchDepartments);
+        if (fresh.isNotEmpty) {
+          unawaited(repository.cache.saveDepartments(fresh));
+          return fresh;
+        }
+      } catch (e) {
+        if (_isUnauthorized(e)) rethrow;
+      }
+      return cached ?? const <DepartmentSummary>[];
+    }
 
-    final manageableConversations = await safeList(
-      repository.fetchManageableConversations,
+    Future<List<BranchSummary>> loadBranchesWithCacheFallback() async {
+      final cached = await repository.cache.loadBranches();
+      try {
+        final fresh = await _guardAuth(repository.fetchBranches);
+        if (fresh.isNotEmpty) {
+          unawaited(repository.cache.saveBranches(fresh));
+          return fresh;
+        }
+      } catch (e) {
+        if (_isUnauthorized(e)) rethrow;
+      }
+      return cached ?? const <BranchSummary>[];
+    }
+
+    final conversationsFuture = _guardAuth(repository.fetchConversations);
+    unawaited(conversationsFuture.then((conversations) {
+      if (_disposed) return;
+      final current = state.valueOrNull;
+      if (current != null && conversations.isNotEmpty) {
+        _setStateAndCache(
+          _copyOverview(
+            source: current,
+            conversations: _sortConversations(conversations),
+          ),
+        );
+      }
+    }).catchError((_) {}));
+
+    final cachedUsersFuture = repository.cache.loadUsers();
+
+    // Load users lazily — do NOT block initial render on the full user directory.
+    // Conversations, departments, branches, roles, and cached users are loaded in parallel;
+    // fresh users are fetched in the background and merged in once ready.
+    final results = await Future.wait([
+      conversationsFuture,
+      loadDepartmentsWithCacheFallback(),
+      loadBranchesWithCacheFallback(),
+      safeList(repository.fetchManageableConversations),
+      safeList(repository.fetchRoles),
+      cachedUsersFuture,
+    ]);
+
+    // Kick off user directory load in background — UI renders without waiting
+    unawaited(loadAllUsers().then((users) {
+      if (_disposed) return;
+      final current = state.valueOrNull;
+      if (current != null && users.isNotEmpty) {
+        final mergedUsersMap = <String, ChatDirectoryUser>{
+          for (final u in current.users) u.id: u,
+        };
+        for (final u in users) {
+          final existing = mergedUsersMap[u.id];
+          mergedUsersMap[u.id] =
+              existing != null ? _mergeChatDirectoryUsers(u, existing) : u;
+        }
+        _setStateAndCache(
+          _copyOverview(
+            source: current,
+            users: mergedUsersMap.values.toList(),
+          ),
+        );
+      }
+    }).catchError((_) {}));
+
+    final conversations = _sortConversations(results[0] as List<ChatConversation>);
+    final cachedUsers = (results[5] as List<ChatDirectoryUser>?) ?? const <ChatDirectoryUser>[];
+    final userMap = <String, ChatDirectoryUser>{
+      for (final u in cachedUsers) u.id: u,
+    };
+    for (final conv in conversations) {
+      for (final member in conv.members) {
+        final existing = userMap[member.id];
+        if (existing == null) {
+          userMap[member.id] = member;
+        } else {
+          userMap[member.id] = _mergeChatDirectoryUsers(existing, member);
+        }
+      }
+    }
+    final users = userMap.values.toList();
+    final departments = results[1] as List<DepartmentSummary>;
+    final branches = results[2] as List<BranchSummary>;
+    final rawManageableConversations = results[3] as List<ChatConversation>;
+    final roles = results[4] as List<ChatRole>;
+
+    final manageableMap = <String, ChatConversation>{
+      for (final conv in conversations)
+        if (conv.type != 'direct') conv.id: conv,
+      for (final conv in rawManageableConversations)
+        if (conv.type != 'direct') conv.id: conv,
+    };
+    final manageableConversations = _sortConversations(
+      manageableMap.values.toList(),
     );
-    final roles = await safeList(repository.fetchRoles);
+
+    if (departments.isNotEmpty) {
+      unawaited(repository.cache.saveDepartments(departments));
+    }
+    if (branches.isNotEmpty) {
+      unawaited(repository.cache.saveBranches(branches));
+    }
+
+    if (departments.isEmpty || branches.isEmpty) {
+      Future.delayed(const Duration(seconds: 2), () {
+        if (!_disposed) {
+          unawaited(ensureDepartmentsAndBranchesLoaded());
+        }
+      });
+    }
 
     return ChatOverviewData(
       conversations: conversations,
       manageableConversations: manageableConversations,
-      users: usersPage.users,
+      users: users,
       departments: departments,
       branches: branches,
       roles: roles,
     );
+  }
+
+  Future<void> ensureDepartmentsAndBranchesLoaded() async {
+    final current = state.valueOrNull;
+    if (current == null || _disposed) return;
+    if (current.departments.isNotEmpty && current.branches.isNotEmpty) return;
+
+    try {
+      final repository = _repository();
+      final freshDeptsFuture = current.departments.isEmpty
+          ? _guardAuth(repository.fetchDepartments).catchError((_) => <DepartmentSummary>[])
+          : Future.value(current.departments);
+      final freshBranchesFuture = current.branches.isEmpty
+          ? _guardAuth(repository.fetchBranches).catchError((_) => <BranchSummary>[])
+          : Future.value(current.branches);
+
+      final depts = await freshDeptsFuture;
+      final branches = await freshBranchesFuture;
+
+      if (_disposed) return;
+      final latest = state.valueOrNull;
+      if (latest != null && (depts.isNotEmpty || branches.isNotEmpty)) {
+        final nextDepts = depts.isNotEmpty ? depts : latest.departments;
+        final nextBranches = branches.isNotEmpty ? branches : latest.branches;
+        if (nextDepts.isNotEmpty) {
+          unawaited(repository.cache.saveDepartments(nextDepts));
+        }
+        if (nextBranches.isNotEmpty) {
+          unawaited(repository.cache.saveBranches(nextBranches));
+        }
+        _setStateAndCache(
+          ChatOverviewData(
+            conversations: latest.conversations,
+            manageableConversations: latest.manageableConversations,
+            users: latest.users,
+            departments: nextDepts,
+            branches: nextBranches,
+            roles: latest.roles,
+          ),
+        );
+      }
+    } catch (_) {}
   }
 
   Future<void> loadMoreUsers() async {
@@ -157,7 +416,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     _loadingMoreUsers = true;
     try {
       final page = await _guardAuth(
-        () => _repository().fetchUsersPage(page: _usersPage + 1),
+        () => _repository().fetchUsersPage(page: _usersPage + 1, limit: 500),
       );
       _usersPage = page.page;
       _hasMoreUsers = page.hasMore;
@@ -171,6 +430,30 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     } finally {
       _loadingMoreUsers = false;
     }
+  }
+
+  Future<void> ensureAllUsersLoaded() async {
+    final current = state.valueOrNull;
+    if (current == null || !_hasMoreUsers) return;
+    while (_hasMoreUsers) {
+      final beforePage = _usersPage;
+      await loadMoreUsers();
+      if (_usersPage == beforePage) break;
+    }
+  }
+
+  void _listenToOutbox() {
+    _outboxSubscription?.cancel();
+    final outboxService = _outbox();
+    _outboxSubscription = outboxService.events.listen((event) {
+      if (event is ChatOutboxConfirmedEvent) {
+        applyConfirmedOutboxMessage(
+          event.conversationId,
+          'temp_${event.clientMessageId}',
+          event.message,
+        );
+      }
+    });
   }
 
   void _listenToSocket() {
@@ -190,6 +473,14 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         if (state.isLoading && state.valueOrNull == null) {
           return;
         }
+        // Debounce: skip full refresh if one happened within the last 10 seconds
+        // to avoid reconnect storms on flapping VPN connections.
+        final now = DateTime.now();
+        if (_lastSocketRefreshAt != null &&
+            now.difference(_lastSocketRefreshAt!).inSeconds < 10) {
+          return;
+        }
+        _lastSocketRefreshAt = now;
         Future<void>.microtask(() async {
           if (_disposed) {
             return;
@@ -201,6 +492,14 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
 
       if (event.type == 'message_seen') {
         _applySeenUpdate(
+          conversationId: event.payload['conversationId']?.toString(),
+          userId: event.payload['userId']?.toString(),
+        );
+        return;
+      }
+
+      if (event.type == 'message_delivered') {
+        _applyDeliveredUpdate(
           conversationId: event.payload['conversationId']?.toString(),
           userId: event.payload['userId']?.toString(),
         );
@@ -248,11 +547,27 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         return;
       }
 
+      if (event.type == 'users_updated' ||
+          event.type == 'departments_updated' ||
+          event.type == 'branches_updated') {
+        _scheduleDirectoryRefresh();
+        return;
+      }
+
       if (event.type == 'presence_updated' ||
           event.type == 'user_online' ||
           event.type == 'user_offline') {
         _applyPresenceUpdate(event);
       }
+    });
+  }
+
+  void _scheduleDirectoryRefresh() {
+    _directoryRefreshTimer?.cancel();
+    final jitterMs = 1500 + Random().nextInt(3501);
+    _directoryRefreshTimer = Timer(Duration(milliseconds: jitterMs), () {
+      if (_disposed) return;
+      unawaited(refresh(showLoader: false));
     });
   }
 
@@ -271,6 +586,43 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       branches: source.branches,
       roles: source.roles,
     );
+  }
+
+  String get _effectiveCurrentUserId {
+    final authId = ref.read(authControllerProvider).valueOrNull?.id.trim();
+    if (authId != null && authId.isNotEmpty) {
+      _currentUserId = authId;
+      return authId;
+    }
+    final currentId = ref.read(currentUserProvider)?.id.trim();
+    if (currentId != null && currentId.isNotEmpty) {
+      _currentUserId = currentId;
+      return currentId;
+    }
+    return _currentUserId.trim();
+  }
+
+  bool _isMessageFromMe(ChatLastMessage? last, ChatConversation conversation) {
+    if (last == null) return false;
+    final myId = _effectiveCurrentUserId;
+    if (conversation.isSelfChat(myId)) return true;
+    if (last.status == 'pending' || (last.id != null && last.id!.startsWith('temp_'))) {
+      return true;
+    }
+    final sId = (last.senderId ?? '').trim();
+    if (myId.isNotEmpty && sId.isNotEmpty && sId == myId) {
+      return true;
+    }
+    if (conversation.type == 'direct') {
+      final others = conversation.members.where((m) => m.id.trim() != myId).toList();
+      if (others.length == 1) {
+        final peerId = others.first.id.trim();
+        if (peerId.isNotEmpty && sId.isNotEmpty) {
+          return sId != peerId;
+        }
+      }
+    }
+    return false;
   }
 
   ChatLastMessage _buildLastMessage(ChatMessage message) {
@@ -299,11 +651,27 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         _ => 'رسالة',
       };
     }
+    final senderId = message.sender?.id ?? message.senderId;
+    final isSeen = message.seenBy.any((e) => e.userId != senderId);
+    final isDelivered = message.deliveredTo.any((e) => e.userId != senderId);
+    final status = message.isPending
+        ? 'pending'
+        : message.isFailed
+            ? 'failed'
+            : isSeen
+                ? 'read'
+                : isDelivered
+                    ? 'delivered'
+                    : 'sent';
     return ChatLastMessage(
+      id: message.id,
       content: content,
-      senderId: message.sender?.id ?? message.senderId,
+      senderId: senderId,
       senderName: message.sender?.displayName ?? '',
       messageType: message.messageType,
+      seenBy: message.seenBy,
+      deliveredTo: message.deliveredTo,
+      status: status,
       createdAt: message.createdAt,
     );
   }
@@ -338,14 +706,22 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       fullName: updated.fullName.isNotEmpty
           ? updated.fullName
           : source.fullName,
+      jobTitle: updated.jobTitle.isNotEmpty
+          ? updated.jobTitle
+          : source.jobTitle,
       role: updated.role.isNotEmpty ? updated.role : source.role,
-      departmentId: updated.departmentId,
-      branchId: updated.branchId,
-      branchCode: updated.branchCode,
+      departmentId: updated.departmentId ?? source.departmentId,
+      departmentIds: updated.departmentIds.isNotEmpty
+          ? updated.departmentIds
+          : source.departmentIds,
+      branchId: updated.branchId ?? source.branchId,
+      branchCode: updated.branchCode.isNotEmpty
+          ? updated.branchCode
+          : source.branchCode,
       isOnline: source.isOnline,
       presenceStatus: source.presenceStatus,
       isActive: updated.isActive,
-      avatarUrl: updated.avatarUrl,
+      avatarUrl: updated.avatarUrl ?? source.avatarUrl,
       lastSeen: source.lastSeen,
       lastActiveAt: source.lastActiveAt,
     );
@@ -427,18 +803,9 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     DateTime? lastSeen,
     DateTime? lastActiveAt,
   }) {
-    return ChatDirectoryUser(
-      id: source.id,
-      username: source.username,
-      fullName: source.fullName,
-      role: source.role,
-      departmentId: source.departmentId,
-      branchId: source.branchId,
-      branchCode: source.branchCode,
+    return source.copyWith(
       isOnline: isOnline,
       presenceStatus: presenceStatus,
-      isActive: source.isActive,
-      avatarUrl: source.avatarUrl,
       lastSeen: lastSeen ?? source.lastSeen,
       lastActiveAt: lastActiveAt ?? source.lastActiveAt,
     );
@@ -446,7 +813,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
 
   void _applyPresenceUpdate(ChatSocketEvent event) {
     final current = state.valueOrNull;
-    if (current == null) {
+    if (current == null || _disposed) {
       return;
     }
 
@@ -467,59 +834,114 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         ? DateTime.tryParse(event.payload['lastActiveAt'] as String)
         : null;
 
-    _setStateAndCache(
+    final pending = _pendingPresenceUpdates[userId];
+    if (pending == null) {
+      final matchingUser = current.users.cast<ChatDirectoryUser?>().firstWhere(
+        (u) => u?.id == userId,
+        orElse: () => null,
+      );
+      if (matchingUser != null &&
+          matchingUser.isOnline == isOnline &&
+          matchingUser.presenceStatus == presenceStatus &&
+          lastSeen == null &&
+          lastActiveAt == null) {
+        return;
+      }
+    }
+
+    _pendingPresenceUpdates[userId] = (
+      isOnline: isOnline,
+      presenceStatus: presenceStatus,
+      lastSeen: lastSeen ?? pending?.lastSeen,
+      lastActiveAt: lastActiveAt ?? pending?.lastActiveAt,
+    );
+
+    if (!(_presenceBatchTimer?.isActive ?? false)) {
+      _presenceBatchTimer = Timer(presenceBatchWindow, flushPresenceUpdates);
+    }
+  }
+
+  @visibleForTesting
+  void flushPresenceUpdates() {
+    _presenceBatchTimer?.cancel();
+    _presenceBatchTimer = null;
+    if (_disposed || _pendingPresenceUpdates.isEmpty) {
+      _pendingPresenceUpdates.clear();
+      return;
+    }
+    final current = state.valueOrNull;
+    if (current == null) {
+      _pendingPresenceUpdates.clear();
+      return;
+    }
+
+    final updates = Map<
+      String,
+      ({
+        bool isOnline,
+        String presenceStatus,
+        DateTime? lastSeen,
+        DateTime? lastActiveAt,
+      })
+    >.from(_pendingPresenceUpdates);
+    _pendingPresenceUpdates.clear();
+
+    bool anyChanged = false;
+
+    List<ChatDirectoryUser> applyToUsers(List<ChatDirectoryUser> list) {
+      bool listChanged = false;
+      final updatedList = list.map((user) {
+        final patch = updates[user.id];
+        if (patch == null) {
+          return user;
+        }
+        if (user.isOnline == patch.isOnline &&
+            user.presenceStatus == patch.presenceStatus &&
+            patch.lastSeen == null &&
+            patch.lastActiveAt == null) {
+          return user;
+        }
+        listChanged = true;
+        anyChanged = true;
+        return _copyPresenceUser(
+          user,
+          isOnline: patch.isOnline,
+          presenceStatus: patch.presenceStatus,
+          lastSeen: patch.lastSeen,
+          lastActiveAt: patch.lastActiveAt,
+        );
+      }).toList(growable: false);
+      return listChanged ? updatedList : list;
+    }
+
+    List<ChatConversation> applyToConversations(List<ChatConversation> convs) {
+      bool listChanged = false;
+      final updatedConvs = convs.map((conv) {
+        final nextMembers = applyToUsers(conv.members);
+        if (identical(nextMembers, conv.members)) {
+          return conv;
+        }
+        listChanged = true;
+        return conv.copyWith(members: nextMembers);
+      }).toList(growable: false);
+      return listChanged ? updatedConvs : convs;
+    }
+
+    final nextUsers = applyToUsers(current.users);
+    final nextConversations = applyToConversations(current.conversations);
+    final nextManageable = applyToConversations(
+      current.manageableConversations,
+    );
+
+    if (!anyChanged) {
+      return;
+    }
+
+    state = AsyncData(
       ChatOverviewData(
-        conversations: current.conversations
-            .map(
-              (conversation) => conversation.copyWith(
-                members: conversation.members
-                    .map(
-                      (member) => member.id == userId
-                          ? _copyPresenceUser(
-                              member,
-                              isOnline: isOnline,
-                              presenceStatus: presenceStatus,
-                              lastSeen: lastSeen,
-                              lastActiveAt: lastActiveAt,
-                            )
-                          : member,
-                    )
-                    .toList(),
-              ),
-            )
-            .toList(),
-        users: current.users
-            .map(
-              (user) => user.id == userId
-                  ? _copyPresenceUser(
-                      user,
-                      isOnline: isOnline,
-                      presenceStatus: presenceStatus,
-                      lastSeen: lastSeen,
-                      lastActiveAt: lastActiveAt,
-                    )
-                  : user,
-            )
-            .toList(),
-        manageableConversations: current.manageableConversations
-            .map(
-              (conversation) => conversation.copyWith(
-                members: conversation.members
-                    .map(
-                      (member) => member.id == userId
-                          ? _copyPresenceUser(
-                              member,
-                              isOnline: isOnline,
-                              presenceStatus: presenceStatus,
-                              lastSeen: lastSeen,
-                              lastActiveAt: lastActiveAt,
-                            )
-                          : member,
-                    )
-                    .toList(),
-              ),
-            )
-            .toList(),
+        conversations: nextConversations,
+        manageableConversations: nextManageable,
+        users: nextUsers,
         departments: current.departments,
         branches: current.branches,
         roles: current.roles,
@@ -527,11 +949,45 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     );
   }
 
+  Future<void> _upsertIncomingMessageInCache(ChatMessage message) async {
+    try {
+      final cached = await _repository().getCachedMessages(message.conversationId);
+      if (cached != null) {
+        final updated = sortAndDedupeChatMessages([...cached.messages, message]);
+        final jsonList = updated.map((m) => m.toJson()).toList();
+        await _repository().cache.saveRawJson('messages_${message.conversationId}', {
+          'messages': jsonList,
+          'meta': {
+            'nextCursor': cached.nextCursor,
+            'hasMore': cached.hasMore,
+            'limit': cached.limit,
+          },
+        });
+      }
+    } catch (_) {}
+  }
+
   void _applyIncomingMessage(ChatMessage message) {
+    if (message.id.isNotEmpty) {
+      if (_processedIncomingMessageIds.contains(message.id)) {
+        return;
+      }
+      _processedIncomingMessageIds.add(message.id);
+      if (_processedIncomingMessageIds.length > 500) {
+        _processedIncomingMessageIds.remove(_processedIncomingMessageIds.first);
+      }
+    }
+    unawaited(_upsertIncomingMessageInCache(message));
+
     final current = state.valueOrNull;
     if (current == null) {
       return;
     }
+
+    final myId = _effectiveCurrentUserId.trim();
+    final effectiveSenderId = (message.sender?.id ?? message.senderId).trim();
+    final isFromCurrentUser =
+        myId.isNotEmpty && effectiveSenderId.isNotEmpty && effectiveSenderId == myId;
 
     final index = current.conversations.indexWhere(
       (conversation) => conversation.id == message.conversationId,
@@ -554,7 +1010,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
 
           final inserted = conversation.copyWith(
             lastMessage: _buildLastMessage(message),
-            unreadCount: message.sender?.id == _currentUserId ? 0 : 1,
+            unreadCount: isFromCurrentUser ? 0 : 1,
             updatedAt: message.createdAt,
           );
 
@@ -574,13 +1030,16 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
 
     final activeConversationId = ref.read(activeConversationIdProvider);
     final isAppVisible = ref.read(chatAppVisibilityProvider);
+    final isChatSectionVisible = ref.read(chatSectionVisibleProvider);
     final isActiveConversation =
-        activeConversationId == message.conversationId && isAppVisible;
+        activeConversationId == message.conversationId &&
+        isAppVisible &&
+        isChatSectionVisible;
     final updated = [...current.conversations];
     final existing = updated[index];
     updated[index] = existing.copyWith(
       lastMessage: _buildLastMessage(message),
-      unreadCount: message.sender?.id == _currentUserId || isActiveConversation
+      unreadCount: isFromCurrentUser || isActiveConversation
           ? 0
           : existing.unreadCount + 1,
       updatedAt: message.createdAt,
@@ -593,7 +1052,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       ),
     );
 
-    if (isActiveConversation && message.sender?.id != _currentUserId) {
+    if (isActiveConversation && !isFromCurrentUser) {
       Future<void>.microtask(() async {
         if (_disposed) {
           return;
@@ -664,6 +1123,110 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     _setStateAndCache(_copyOverview(source: current, conversations: updated));
   }
 
+  void updateLastMessageOptimistically(
+    String conversationId,
+    ChatMessage message,
+  ) {
+    final current = state.valueOrNull;
+    if (current == null) return;
+
+    final index =
+        current.conversations.indexWhere((c) => c.id == conversationId);
+    if (index == -1) return;
+
+    final updated = [...current.conversations];
+    final existing = updated[index];
+    final lastMessage = _buildLastMessage(message);
+
+    updated[index] = existing.copyWith(
+      lastMessage: lastMessage,
+      updatedAt: message.createdAt,
+    );
+
+    _setStateAndCache(
+      _copyOverview(
+        source: current,
+        conversations: _sortConversations(updated),
+      ),
+    );
+  }
+
+  void applyConfirmedOutboxMessage(
+    String conversationId,
+    String tempId,
+    ChatMessage confirmed,
+  ) {
+    unawaited(_upsertIncomingMessageInCache(confirmed));
+
+    final current = state.valueOrNull;
+    if (current == null) return;
+
+    final index =
+        current.conversations.indexWhere((c) => c.id == conversationId);
+    if (index == -1) return;
+
+    final updated = [...current.conversations];
+    final existing = updated[index];
+    if (existing.lastMessage?.id == tempId ||
+        existing.lastMessage?.id == confirmed.id) {
+      updated[index] = existing.copyWith(
+        lastMessage: _buildLastMessage(confirmed),
+        updatedAt: confirmed.createdAt,
+      );
+      _setStateAndCache(
+        _copyOverview(
+          source: current,
+          conversations: _sortConversations(updated),
+        ),
+      );
+    }
+  }
+
+  void removePendingOutboxMessage(
+    String conversationId,
+    String tempId,
+  ) {
+    final current = state.valueOrNull;
+    if (current == null) return;
+    final index =
+        current.conversations.indexWhere((c) => c.id == conversationId);
+    if (index == -1) return;
+    final updated = [...current.conversations];
+    final existing = updated[index];
+    if (existing.lastMessage?.id == tempId) {
+      unawaited(refresh());
+    }
+  }
+
+  void applyFailedOutboxMessage(
+    String conversationId,
+    String tempId,
+    String error,
+  ) {
+    final current = state.valueOrNull;
+    if (current == null) return;
+
+    final index =
+        current.conversations.indexWhere((c) => c.id == conversationId);
+    if (index == -1) return;
+
+    final updated = [...current.conversations];
+    final existing = updated[index];
+    if (existing.lastMessage?.id == tempId) {
+      updated[index] = existing.copyWith(
+        lastMessage: existing.lastMessage?.copyWith(
+          status: 'failed',
+        ),
+      );
+      _setStateAndCache(
+        _copyOverview(
+          source: current,
+          conversations: _sortConversations(updated),
+        ),
+      );
+    }
+  }
+
   void _applySeenUpdate({
     required String? conversationId,
     required String? userId,
@@ -673,17 +1236,72 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       return;
     }
 
-    if (userId != _currentUserId) {
+    final myId = _effectiveCurrentUserId;
+    final isMe = myId.isNotEmpty && userId.trim() == myId;
+
+    final updated = current.conversations.map((conversation) {
+      if (conversation.id != conversationId) {
+        return conversation;
+      }
+      var conv = conversation;
+      if (isMe) {
+        conv = conv.copyWith(unreadCount: 0);
+      }
+      final last = conv.lastMessage;
+      if ((!isMe || conv.isSelfChat(myId)) &&
+          last != null &&
+          _isMessageFromMe(last, conv)) {
+        final updatedSeenBy = [
+          ...last.seenBy.where((e) => e.userId.trim() != userId.trim()),
+          ChatReceipt(userId: userId.trim(), at: DateTime.now()),
+        ];
+        conv = conv.copyWith(
+          lastMessage: last.copyWith(
+            seenBy: updatedSeenBy,
+            status: 'read',
+          ),
+        );
+      }
+      return conv;
+    }).toList();
+
+    _setStateAndCache(_copyOverview(source: current, conversations: updated));
+  }
+
+  void _applyDeliveredUpdate({
+    required String? conversationId,
+    required String? userId,
+  }) {
+    final current = state.valueOrNull;
+    if (current == null || conversationId == null || userId == null) {
+      return;
+    }
+    final myId = _effectiveCurrentUserId;
+    if (myId.isNotEmpty && userId.trim() == myId) {
       return;
     }
 
-    final updated = current.conversations
-        .map(
-          (conversation) => conversation.id == conversationId
-              ? conversation.copyWith(unreadCount: 0)
-              : conversation,
-        )
-        .toList();
+    final updated = current.conversations.map((conversation) {
+      if (conversation.id != conversationId) {
+        return conversation;
+      }
+      final last = conversation.lastMessage;
+      if (last != null && _isMessageFromMe(last, conversation)) {
+        if (!last.isSeenByAny(myId)) {
+          final updatedDelivered = [
+            ...last.deliveredTo.where((e) => e.userId.trim() != userId.trim()),
+            ChatReceipt(userId: userId.trim(), at: DateTime.now()),
+          ];
+          return conversation.copyWith(
+            lastMessage: last.copyWith(
+              deliveredTo: updatedDelivered,
+              status: last.status == 'read' ? 'read' : 'delivered',
+            ),
+          );
+        }
+      }
+      return conversation;
+    }).toList();
 
     _setStateAndCache(_copyOverview(source: current, conversations: updated));
   }
@@ -697,21 +1315,31 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     final updated = [...current.conversations];
     final index = updated.indexWhere((entry) => entry.id == conversation.id);
     if (index == -1) {
+      // Do not insert an empty direct conversation into the sidebar for the recipient
+      if (conversation.type == 'direct') {
+        final hasMessages = conversation.lastMessage != null &&
+            ((conversation.lastMessage!.id?.isNotEmpty ?? false) ||
+                conversation.lastMessage!.content.isNotEmpty);
+        final isMine = conversation.createdBy == _effectiveCurrentUserId;
+        if (!hasMessages && !isMine) {
+          return;
+        }
+      }
       updated.insert(0, conversation);
     } else {
-      updated[index] = conversation.copyWith(
-        unreadCount: updated[index].unreadCount,
-      );
+      updated[index] = conversation;
     }
 
     final manageable = [...current.manageableConversations];
-    final manageableIndex = manageable.indexWhere(
-      (entry) => entry.id == conversation.id,
-    );
-    if (manageableIndex != -1) {
-      manageable[manageableIndex] = conversation.copyWith(
-        unreadCount: manageable[manageableIndex].unreadCount,
+    if (conversation.type != 'direct') {
+      final manageableIndex = manageable.indexWhere(
+        (entry) => entry.id == conversation.id,
       );
+      if (manageableIndex == -1) {
+        manageable.insert(0, conversation);
+      } else {
+        manageable[manageableIndex] = conversation;
+      }
     }
 
     _setStateAndCache(
@@ -732,16 +1360,27 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       return;
     }
 
+    final updated = current.conversations
+        .map(
+          (conversation) => conversation.id == conversationId
+              ? conversation.copyWith(unreadCount: unreadCount)
+              : conversation,
+        )
+        .toList();
+
+    final manageable = current.manageableConversations
+        .map(
+          (conversation) => conversation.id == conversationId
+              ? conversation.copyWith(unreadCount: unreadCount)
+              : conversation,
+        )
+        .toList();
+
     _setStateAndCache(
       _copyOverview(
         source: current,
-        conversations: current.conversations
-            .map(
-              (conversation) => conversation.id == conversationId
-                  ? conversation.copyWith(unreadCount: unreadCount)
-                  : conversation,
-            )
-            .toList(),
+        conversations: updated,
+        manageableConversations: manageable,
       ),
     );
   }
@@ -763,6 +1402,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
             .toList(),
       ),
     );
+    unawaited(_repository().cache.removeConversation(conversationId));
   }
 
   void _applyConversationStateUpdate({
@@ -795,18 +1435,38 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     );
   }
 
-  Future<void> refresh({bool showLoader = false}) async {
+  Future<void> refresh({bool showLoader = false}) {
+    if (_disposed) {
+      return Future<void>.value();
+    }
+    final existing = _refreshInFlight;
+    if (existing != null && !showLoader) {
+      return existing;
+    }
+    final future = _performRefresh(showLoader: showLoader);
+    _refreshInFlight = future;
+    return future.whenComplete(() {
+      if (identical(_refreshInFlight, future)) {
+        _refreshInFlight = null;
+      }
+    });
+  }
+
+  Future<void> _performRefresh({bool showLoader = false}) async {
     if (_disposed) {
       return;
     }
     if (!await _waitForAuthenticatedSession()) {
       return;
     }
+    _lastSocketRefreshAt = DateTime.now();
     final previous = state.valueOrNull;
     if (showLoader || previous == null) {
       state = const AsyncLoading();
     }
-    final next = await AsyncValue.guard(() => _guardAuth(_loadOverview));
+    final next = await AsyncValue.guard(
+      () => _guardAuth(() => _loadOverview(forceNetwork: true)),
+    );
     if (_disposed) {
       return;
     }
@@ -828,6 +1488,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     required String type,
     required String name,
     String description = '',
+    String? avatarUrl,
     List<String> memberIds = const [],
     List<String> adminIds = const [],
     String? departmentId,
@@ -837,6 +1498,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       type: type,
       name: name,
       description: description,
+      avatarUrl: avatarUrl,
       memberIds: memberIds,
       adminIds: adminIds,
       departmentId: departmentId,
@@ -902,6 +1564,12 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     );
   }
 
+  Future<ChatMessage> togglePollStatus(String messageId) async {
+    return _guardAuth(
+      () => _repository().togglePollStatus(messageId),
+    );
+  }
+
   String exportPollUrl(String messageId) {
     return _repository().exportPollUrl(messageId);
   }
@@ -910,18 +1578,14 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     String conversationId, {
     bool deleteForEveryone = false,
   }) async {
+    _applyConversationDeleted(conversationId);
     try {
-      final conversation = await _guardAuth(
+      await _guardAuth(
         () => _repository().deleteConversation(
           conversationId,
           deleteForEveryone: deleteForEveryone,
         ),
       );
-      if (conversation != null) {
-        _applyConversationUpdate(conversation);
-        return;
-      }
-      await refresh();
     } catch (error) {
       final text = error.toString().toLowerCase();
       final isNotFound =
@@ -929,10 +1593,25 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
           (text.contains('conversation not found') ||
               text.contains('404') ||
               text.contains('غير موجود'));
-      if (isNotFound) {
+      if (!isNotFound) {
         await refresh();
-        return;
+        rethrow;
       }
+    }
+  }
+
+  Future<void> clearConversationMessages(String conversationId) async {
+    try {
+      final updated = await _guardAuth(
+        () => _repository().clearConversationMessages(conversationId),
+      );
+      if (updated != null) {
+        _applyConversationUpdate(updated);
+      } else {
+        await refresh();
+      }
+    } catch (_) {
+      await refresh();
       rethrow;
     }
   }
@@ -957,12 +1636,14 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     required String name,
     required String code,
     String description = '',
+    List<String> managers = const [],
   }) async {
     final repository = _repository();
     await repository.createDepartment(
       name: name,
       code: code,
       description: description,
+      managers: managers,
     );
     await refresh();
   }
@@ -1067,6 +1748,46 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     await refresh();
   }
 
+Future<ChatConversation> uploadConversationAvatar({
+    required String conversationId,
+    String? filePath,
+    Uint8List? fileBytes,
+    String? fileName,
+  }) async {
+    final conversation = await _repository().uploadConversationAvatar(
+      conversationId: conversationId,
+      filePath: filePath,
+      fileBytes: fileBytes,
+      fileName: fileName,
+    );
+    _applyConversationUpdate(conversation);
+    return conversation;
+  }
+
+  Future<ChatConversation> removeConversationAvatar({
+    required String conversationId,
+  }) async {
+    final conversation = await _repository().removeConversationAvatar(
+      conversationId,
+    );
+    _applyConversationUpdate(conversation);
+    return conversation;
+  }
+
+  Future<ChatConversation> updateGroupInfo({
+    required String conversationId,
+    String? name,
+    String? description,
+  }) async {
+    final conversation = await _repository().updateManagedConversation(
+      conversationId: conversationId,
+      name: name,
+      description: description,
+    );
+    _applyConversationUpdate(conversation);
+    return conversation;
+  }
+
   Future<ChatConversation> addGroupMembers({
     required String conversationId,
     required List<String> userIds,
@@ -1139,30 +1860,56 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     return conversation;
   }
 
+  Timer? _overviewCacheDebounceTimer;
+
   Future<void> _saveStateToCache(ChatOverviewData data) async {
     try {
       final jsonList = data.conversations.map((c) => c.toJson()).toList();
       await _repository().cache.saveRawJson('conversations', {
         'conversations': jsonList,
       });
+      if (data.users.isNotEmpty) {
+        await _repository().cache.saveUsers(data.users);
+      }
+      if (data.departments.isNotEmpty) {
+        await _repository().cache.saveDepartments(data.departments);
+      }
+      if (data.branches.isNotEmpty) {
+        await _repository().cache.saveBranches(data.branches);
+      }
     } catch (_) {}
   }
 
-  void _setStateAndCache(ChatOverviewData data) {
+  void _setStateAndCache(ChatOverviewData data, {bool immediate = false}) {
     state = AsyncData(data);
-    _saveStateToCache(data);
+    _overviewCacheDebounceTimer?.cancel();
+    if (immediate) {
+      _saveStateToCache(data);
+    } else {
+      _overviewCacheDebounceTimer = Timer(const Duration(seconds: 4), () {
+        _saveStateToCache(data);
+      });
+    }
   }
 }
 
 class ConversationMessagesController
     extends AutoDisposeFamilyAsyncNotifier<ConversationMessagesState, String> {
   StreamSubscription<ChatSocketEvent>? _eventsSubscription;
+  StreamSubscription<ChatOutboxEvent>? _outboxSubscription;
   ChatSocketService? _socketService;
   ChatRepository? _chatRepository;
+  ChatOutboxService? _chatOutboxService;
   bool _isRefreshing = false;
   bool _disposed = false;
+  bool _isInitialBuildFetchingNetwork = false;
+  bool _staleOnReconnect = false;
+  DateTime? _lastNetworkFetchAt;
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
+
+  ChatOutboxService _outbox() =>
+      _chatOutboxService ?? ref.read<ChatOutboxService>(chatOutboxServiceProvider);
 
   bool _isUnauthorized(Object error) {
     return error is ApiException && error.isUnauthorized;
@@ -1181,28 +1928,23 @@ class ConversationMessagesController
     }
   }
 
-  Future<bool> _waitForAuthenticatedSession() async {
-    ref.watch(authCredentialsRevisionProvider);
-    final authUser = ref.watch(currentUserProvider);
-    if (authUser == null) {
-      return false;
-    }
-    final token = await ref.watch(authTokenProvider.future);
-    if (token == null ||
-        token.trim().isEmpty ||
-        token.trim().toLowerCase() == 'null') {
-      throw const ApiException(
-        'انتهت صلاحية الجلسة أو فشل التحقق. سجل الدخول مرة أخرى.',
-        statusCode: 401,
-      );
-    }
-    return true;
+  Future<bool> _waitForAuthenticatedSession({bool listen = false}) {
+    return waitForAuthenticatedSession(ref, listen: listen);
   }
 
   @override
   Future<ConversationMessagesState> build(String arg) async {
-    ref.watch(serverRecoveryRevisionProvider);
-    final hasSession = await _waitForAuthenticatedSession();
+    ref.keepAlive();
+    _isInitialBuildFetchingNetwork = true;
+    try {
+      return await _buildInitialState(arg);
+    } finally {
+      _isInitialBuildFetchingNetwork = false;
+    }
+  }
+
+  Future<ConversationMessagesState> _buildInitialState(String arg) async {
+    final hasSession = await _waitForAuthenticatedSession(listen: true);
     if (!hasSession) {
       return const ConversationMessagesState(
         messages: [],
@@ -1217,23 +1959,96 @@ class ConversationMessagesController
     unawaited(ref.read(chatSocketConnectionProvider.future));
     _socketService = ref.read(chatSocketServiceProvider);
     _chatRepository = ref.read(chatRepositoryProvider);
+    _chatOutboxService = ref.read(chatOutboxServiceProvider);
     _disposed = false;
+    _staleOnReconnect = false;
     _socketService?.joinConversation(arg);
     _listenToSocket(arg);
+    _listenToOutbox(arg);
+    ref.listen<String?>(activeConversationIdProvider, (previous, next) {
+      if (next == arg && _staleOnReconnect && !_disposed && !_isRefreshing) {
+        _staleOnReconnect = false;
+        unawaited(refresh());
+      }
+    });
     ref.onDispose(() {
       _disposed = true;
+      if (_messagesCacheDebounceTimer?.isActive ?? false) {
+        _messagesCacheDebounceTimer?.cancel();
+        final current = state.valueOrNull;
+        if (current != null) {
+          _saveStateToCache(current);
+        }
+      }
       _eventsSubscription?.cancel();
+      _outboxSubscription?.cancel();
       _socketService?.leaveConversation(arg);
     });
 
     final cached = await _repository().getCachedMessages(arg);
     if (cached != null) {
-      Future.microtask(() => refresh());
-      return ConversationMessagesState.initial(_dedupePage(cached));
+      Future.microtask(() => refresh(skipIfFresh: true));
+      return ConversationMessagesState.initial(
+        _dedupePage(_markPendingAsFailed(cached)),
+      );
     }
 
     final page = await _guardAuth(() => _repository().fetchMessages(arg));
+    _lastNetworkFetchAt = DateTime.now();
     return ConversationMessagesState.initial(_dedupePage(page));
+  }
+
+  void _listenToOutbox(String conversationId) {
+    _outboxSubscription?.cancel();
+    final outboxService = _outbox();
+    _outboxSubscription = outboxService.events.listen((event) {
+      if (event.conversationId != conversationId) return;
+      final cur = state.valueOrNull;
+      if (cur == null) return;
+
+      final tempId = 'temp_${event.clientMessageId}';
+      if (event is ChatOutboxProgressEvent) {
+        final idx = cur.messages.indexWhere((m) =>
+            m.id == tempId ||
+            m.metadata?['clientMessageId'] == event.clientMessageId);
+        if (idx != -1) {
+          final existing = cur.messages[idx];
+          final nextMeta = Map<String, dynamic>.from(existing.metadata ?? {});
+          nextMeta['progress'] = event.progress;
+          nextMeta['status'] = 'uploading';
+          final updated = existing.copyWith(metadata: nextMeta);
+          final nextList = List<ChatMessage>.from(cur.messages);
+          nextList[idx] = updated;
+          _setStateAndCache(cur.copyWith(messages: nextList));
+        }
+      } else if (event is ChatOutboxConfirmedEvent) {
+        final nextList = cur.messages
+            .where((m) =>
+                m.id != tempId &&
+                m.id != event.message.id &&
+                m.metadata?['clientMessageId'] != event.clientMessageId)
+            .toList();
+        nextList.insert(0, event.message);
+        _setStateAndCache(
+          cur.copyWith(messages: _sortAndDedupeMessages(nextList)),
+          immediate: true,
+        );
+      } else if (event is ChatOutboxFailedEvent) {
+        final idx = cur.messages.indexWhere((m) =>
+            m.id == tempId ||
+            m.metadata?['clientMessageId'] == event.clientMessageId);
+        if (idx != -1) {
+          final existing = cur.messages[idx];
+          final nextMeta = Map<String, dynamic>.from(existing.metadata ?? {});
+          nextMeta['status'] = 'failed';
+          nextMeta['error'] = event.error;
+          final updated = existing.copyWith(metadata: nextMeta);
+          final nextList = List<ChatMessage>.from(cur.messages);
+          nextList[idx] = updated;
+          _setStateAndCache(cur.copyWith(messages: nextList));
+        }
+      }
+    });
   }
 
   void _listenToSocket(String conversationId) {
@@ -1250,14 +2065,21 @@ class ConversationMessagesController
       }
 
       if (event.type == 'receive_message') {
-        final message = ChatMessage.fromJson(event.payload);
-        if (message.conversationId == conversationId) {
-          _setStateAndCache(
-            current.copyWith(
-              messages: _upsertMessage(current.messages, message),
-            ),
-          );
-        }
+        try {
+          final message = ChatMessage.fromJson(event.payload);
+          if (message.conversationId == conversationId) {
+            final current = state.valueOrNull;
+            if (current != null) {
+              _setStateAndCache(
+                current.copyWith(
+                  messages: _upsertMessage(current.messages, message),
+                ),
+              );
+            } else {
+              unawaited(refresh());
+            }
+          }
+        } catch (_) {}
         return;
       }
 
@@ -1287,37 +2109,44 @@ class ConversationMessagesController
       }
 
       if (event.type == 'socket_connected') {
-        if (state.isLoading && state.valueOrNull == null) {
+        if (_disposed || state.valueOrNull == null) {
           return;
         }
-        Future<void>.microtask(() async {
-          if (_disposed) {
-            return;
+        final activeId = ref.read(activeConversationIdProvider);
+        if (activeId == conversationId) {
+          _staleOnReconnect = false;
+          if (!_isRefreshing) {
+            unawaited(refresh());
           }
-          await refresh();
-        });
+        } else {
+          _staleOnReconnect = true;
+        }
         return;
       }
 
       if (event.type == 'message_seen' &&
           event.payload['conversationId']?.toString() == conversationId) {
-        final messageIds =
-            (event.payload['messageIds'] as List<dynamic>? ?? const [])
-                .map((entry) => entry.toString())
-                .toSet();
+        final rawIds = event.payload['messageIds'];
+        final messageIds = (rawIds is List ? rawIds : const [])
+            .map((entry) => entry.toString())
+            .toSet();
         final userId = event.payload['userId']?.toString();
         if (userId == null) {
           return;
         }
 
-        var matchedAny = false;
         final updatedMessages = current.messages.map((message) {
-          if (!messageIds.contains(message.id)) {
+          final isNotSender =
+              (message.sender?.id ?? message.senderId).trim() != userId.trim();
+          final shouldMark = isNotSender &&
+              (messageIds.isNotEmpty
+                  ? messageIds.contains(message.id)
+                  : true);
+          if (!shouldMark) {
             return message;
           }
-          matchedAny = true;
           final alreadySeen = message.seenBy.any(
-            (entry) => entry.userId == userId,
+            (entry) => entry.userId.trim() == userId.trim(),
           );
           if (alreadySeen) {
             return message;
@@ -1325,58 +2154,56 @@ class ConversationMessagesController
           return message.copyWith(
             seenBy: [
               ...message.seenBy,
-              ChatReceipt(userId: userId, at: DateTime.now()),
+              ChatReceipt(userId: userId.trim(), at: DateTime.now()),
             ],
           );
         }).toList();
 
         _setStateAndCache(current.copyWith(messages: updatedMessages));
-
-        if (!matchedAny) {
-          Future<void>.microtask(() async {
-            if (_disposed) {
-              return;
-            }
-            await refresh();
-          });
-        }
         return;
       }
 
       if (event.type == 'message_delivered' &&
           event.payload['conversationId']?.toString() == conversationId) {
         final userId = event.payload['userId']?.toString();
+        final rawIds = event.payload['messageIds'];
         final affectedIds = <String>{
           if (event.payload['messageId'] != null)
             event.payload['messageId'].toString(),
-          ...(event.payload['messageIds'] as List<dynamic>? ?? const []).map(
+          ...(rawIds is List ? rawIds : const []).map(
             (entry) => entry.toString(),
           ),
         };
-        if (affectedIds.isEmpty || userId == null) {
+        if (userId == null) {
           return;
         }
 
-        _setStateAndCache(
-          current.copyWith(
-            messages: current.messages
-                .map(
-                  (message) =>
-                      affectedIds.contains(message.id) &&
-                          !message.deliveredTo.any(
-                            (entry) => entry.userId == userId,
-                          )
-                      ? message.copyWith(
-                          deliveredTo: [
-                            ...message.deliveredTo,
-                            ChatReceipt(userId: userId, at: DateTime.now()),
-                          ],
-                        )
-                      : message,
-                )
-                .toList(),
-          ),
-        );
+        final updatedMessages = current.messages.map((message) {
+          final isNotSender =
+              (message.sender?.id ?? message.senderId).trim() != userId.trim();
+          final shouldMark = isNotSender &&
+              (affectedIds.isNotEmpty
+                  ? affectedIds.contains(message.id)
+                  : true);
+          if (!shouldMark) {
+            return message;
+          }
+          final alreadyDelivered = message.deliveredTo.any(
+            (entry) => entry.userId.trim() == userId.trim(),
+          );
+          if (alreadyDelivered) {
+            return message;
+          }
+          return message.copyWith(
+            deliveredTo: [
+              ...message.deliveredTo,
+              ChatReceipt(userId: userId.trim(), at: DateTime.now()),
+            ],
+          );
+        }).toList();
+
+        _setStateAndCache(current.copyWith(messages: updatedMessages));
+        return;
       }
     });
   }
@@ -1389,19 +2216,43 @@ class ConversationMessagesController
   }
 
   List<ChatMessage> _sortAndDedupeMessages(Iterable<ChatMessage> source) {
-    final byId = <String, ChatMessage>{};
-    for (final message in source) {
-      byId[message.id] = message;
-    }
-    final items = byId.values.toList();
-    items.sort((a, b) {
-      final byCreatedAt = a.createdAt.compareTo(b.createdAt);
-      if (byCreatedAt != 0) {
-        return byCreatedAt;
+    return sortAndDedupeChatMessages(source);
+  }
+
+  /// Converts cached messages whose status is `pending` to `failed`.
+  /// A pending message in cache means the app was killed before the server
+  /// acknowledged it — it will never auto-confirm, so treat it as failed.
+  ChatMessagesPage _markPendingAsFailed(ChatMessagesPage page) {
+    final outboxService = _outbox();
+    final fixed = page.messages.map((m) {
+      if (!m.id.startsWith('temp_')) {
+        if (m.metadata != null &&
+            (m.metadata!.containsKey('status') ||
+                m.metadata!.containsKey('error'))) {
+          final updated = Map<String, dynamic>.from(m.metadata!);
+          updated.remove('status');
+          updated.remove('error');
+          return m.copyWith(metadata: updated.isEmpty ? null : updated);
+        }
+        return m;
       }
-      return a.id.compareTo(b.id);
-    });
-    return items;
+      final clientMsgId = m.metadata?['clientMessageId']?.toString() ??
+          (m.id.startsWith('temp_') ? m.id.substring(5) : null);
+      final isInOutbox = clientMsgId != null && outboxService.hasItem(clientMsgId);
+      final msgStatus = m.metadata?['status']?.toString();
+      if ((msgStatus == 'pending' || msgStatus == 'uploading') && !isInOutbox) {
+        final updated = Map<String, dynamic>.from(m.metadata ?? {});
+        updated['status'] = 'failed';
+        return m.copyWith(metadata: updated);
+      }
+      return m;
+    }).toList();
+    return ChatMessagesPage(
+      messages: fixed,
+      nextCursor: page.nextCursor,
+      hasMore: page.hasMore,
+      limit: page.limit,
+    );
   }
 
   ChatMessagesPage _dedupePage(ChatMessagesPage page) {
@@ -1480,24 +2331,45 @@ class ConversationMessagesController
     return message.copyWith(metadata: metadata, updatedAt: DateTime.now());
   }
 
-  Future<void> refresh() async {
-    if (_isRefreshing || _disposed) {
+  Future<void> refresh({bool skipIfFresh = false}) async {
+    if (_isRefreshing || _disposed || _isInitialBuildFetchingNetwork) {
       return;
     }
-    if (state.isLoading && state.valueOrNull == null) {
+    if (skipIfFresh &&
+        _lastNetworkFetchAt != null &&
+        DateTime.now().difference(_lastNetworkFetchAt!) <
+            const Duration(seconds: 4)) {
       return;
     }
-    if (!await _waitForAuthenticatedSession()) {
+    if (!await _waitForAuthenticatedSession(listen: false)) {
       return;
     }
+    _staleOnReconnect = false;
     _isRefreshing = true;
     try {
       final page = await _guardAuth(() => _repository().fetchMessages(arg));
+      _lastNetworkFetchAt = DateTime.now();
       if (_disposed) {
         return;
       }
 
-      _setStateAndCache(ConversationMessagesState.initial(_dedupePage(page)));
+      final current = state.valueOrNull;
+      if (current != null && current.messages.isNotEmpty) {
+        final pageMap = {for (final m in page.messages) m.id: m};
+        final olderMessages = current.messages
+            .where((m) => !pageMap.containsKey(m.id))
+            .toList();
+        final mergedMessages = <ChatMessage>[...olderMessages, ...page.messages];
+        _setStateAndCache(
+          current.copyWith(
+            messages: _sortAndDedupeMessages(mergedMessages),
+            hasMore: current.hasMore || page.hasMore,
+            nextCursor: current.nextCursor ?? page.nextCursor,
+          ),
+        );
+      } else {
+        _setStateAndCache(ConversationMessagesState.initial(_dedupePage(page)));
+      }
     } catch (error, stackTrace) {
       if (_disposed) {
         return;
@@ -1516,7 +2388,7 @@ class ConversationMessagesController
     if (current == null || !current.hasMore || current.isLoadingMore) {
       return;
     }
-    if (!await _waitForAuthenticatedSession()) {
+    if (!await _waitForAuthenticatedSession(listen: false)) {
       return;
     }
 
@@ -1588,80 +2460,579 @@ class ConversationMessagesController
     DateTime? scheduledFor,
     String? clientMessageId,
   }) async {
-    _socketService?.markActivity();
-    final stableClientMessageId =
-        clientMessageId ??
-        '${DateTime.now().microsecondsSinceEpoch}_${arg.hashCode}';
-    final result = await _guardAuth(
-      () => _repository().sendTextMessage(
+    final keepAliveLink = ref.keepAlive();
+    try {
+      _socketService?.markActivity();
+      final stableClientMessageId =
+          clientMessageId ??
+          '${DateTime.now().microsecondsSinceEpoch}_${arg.hashCode}';
+
+      final cleanMetadata = Map<String, dynamic>.from(metadata ?? {});
+      cleanMetadata.remove('status');
+      cleanMetadata.remove('error');
+
+      final effectiveMetadata = <String, dynamic>{
+        ...cleanMetadata,
+        'clientMessageId': stableClientMessageId,
+      };
+
+      if (scheduledFor != null) {
+        await _guardAuth(
+          () => _repository().sendTextMessage(
+            conversationId: arg,
+            content: content,
+            clientMessageId: stableClientMessageId,
+            replyToMessageId: replyToMessageId,
+            metadata: effectiveMetadata,
+            messageType: messageType,
+            fileUrl: fileUrl,
+            isSilent: isSilent,
+            isScheduled: true,
+            scheduledFor: scheduledFor,
+          ),
+        );
+        return;
+      }
+
+      if (state.valueOrNull == null) {
+        try {
+          await future;
+        } catch (_) {}
+      }
+
+      final current =
+          state.valueOrNull ??
+          const ConversationMessagesState(
+            messages: [],
+            nextCursor: null,
+            hasMore: false,
+            isLoadingMore: false,
+          );
+
+      final currentUserId =
+          ref.read(authControllerProvider).valueOrNull?.id ?? '';
+      final currentUser = ref.read(currentUserProvider);
+      final tempCreatedAt = DateTime.now();
+
+      final tempMessage = ChatMessage(
+        id: 'temp_$stableClientMessageId',
+        conversationId: arg,
+        senderId: currentUserId,
+        sender: currentUser != null
+            ? ChatDirectoryUser(
+                id: currentUser.id,
+                username: currentUser.username,
+                fullName: currentUser.fullName,
+                jobTitle: currentUser.jobTitle,
+                role: currentUser.role,
+                departmentId: currentUser.departmentId,
+                departmentIds: currentUser.allDepartmentIds,
+                branchId: currentUser.branchId,
+                branchCode: currentUser.branchCode,
+                isOnline: currentUser.isOnline,
+                presenceStatus: currentUser.presenceStatus,
+                isActive: currentUser.isActive,
+                avatarUrl: currentUser.avatarUrl,
+                lastSeen: currentUser.lastSeen,
+                lastActiveAt: currentUser.lastActiveAt,
+              )
+            : null,
+        content: content,
+        messageType: messageType ?? 'text',
+        fileUrl: fileUrl,
+        fileName: null,
+        fileSize: null,
+        mimeType: null,
+        replyToMessageId: replyToMessageId,
+        isDeleted: false,
+        metadata: {
+          ...effectiveMetadata,
+          'status': 'pending',
+        },
+        createdAt: tempCreatedAt,
+        updatedAt: tempCreatedAt,
+        seenBy: const [],
+        deliveredTo: const [],
+      );
+
+      // Optimistic insert: appears immediately at index 0 in descending order
+      _setStateAndCache(
+        current.copyWith(
+          messages: _upsertMessage(current.messages, tempMessage),
+        ),
+      );
+
+      try {
+        ref
+            .read(chatOverviewControllerProvider.notifier)
+            .updateLastMessageOptimistically(arg, tempMessage);
+      } catch (_) {}
+
+      final outbox = _outbox();
+      final outboxItem = ChatOutboxItem(
+        clientMessageId: stableClientMessageId,
         conversationId: arg,
         content: content,
-        clientMessageId: stableClientMessageId,
         replyToMessageId: replyToMessageId,
-        metadata: metadata,
+        metadata: effectiveMetadata,
         messageType: messageType,
         fileUrl: fileUrl,
         isSilent: isSilent,
-        isScheduled: scheduledFor != null,
-        scheduledFor: scheduledFor,
-      ),
-    );
+      );
 
-    if (scheduledFor != null) {
-      // Do not add scheduled messages to the main chat list
-      return;
-    }
-
-    final current =
-        state.valueOrNull ??
-        const ConversationMessagesState(
-          messages: [],
-          nextCursor: null,
-          hasMore: false,
-          isLoadingMore: false,
+      try {
+        final result = await _guardAuth(
+          () => _repository().sendTextMessage(
+            conversationId: arg,
+            content: content,
+            clientMessageId: stableClientMessageId,
+            replyToMessageId: replyToMessageId,
+            metadata: effectiveMetadata,
+            messageType: messageType,
+            fileUrl: fileUrl,
+            isSilent: isSilent,
+            isScheduled: false,
+            scheduledFor: null,
+          ),
         );
-    _setStateAndCache(
-      current.copyWith(
-        messages: _upsertMessage(current.messages, result.message),
-      ),
-    );
+
+        final confirmedMetadata = Map<String, dynamic>.from(
+          result.message.metadata ?? const {},
+        );
+        confirmedMetadata['clientMessageId'] = stableClientMessageId;
+        confirmedMetadata.remove('status');
+        confirmedMetadata.remove('error');
+
+        final confirmedMessage = result.message.copyWith(
+          metadata: confirmedMetadata.isEmpty ? null : confirmedMetadata,
+        );
+
+        final latest = state.valueOrNull ?? current;
+        _setStateAndCache(
+          latest.copyWith(
+            messages: _upsertMessage(latest.messages, confirmedMessage),
+          ),
+          immediate: true,
+        );
+
+        try {
+          ref
+              .read(chatOverviewControllerProvider.notifier)
+              .applyConfirmedOutboxMessage(arg, tempMessage.id, confirmedMessage);
+        } catch (_) {}
+        await outbox.remove(stableClientMessageId);
+      } catch (error) {
+        final isNetErr = isNetworkOrOfflineError(error) ||
+            (_socketService != null && !_socketService!.isConnected);
+        if (isNetErr) {
+          // Network offline / connection lost: enqueue in persistent outbox!
+          // Stays in 'pending' status (clock icon). Automatically sends on reconnect.
+          await outbox.enqueue(outboxItem);
+          debugPrint('[Chat] Message $stableClientMessageId queued in outbox for auto-send on reconnection.');
+          return;
+        }
+
+        final failedMessage = tempMessage.copyWith(
+          metadata: {
+            ...effectiveMetadata,
+            'status': 'failed',
+            'error': error.toString(),
+          },
+        );
+        final latest = state.valueOrNull ?? current;
+        _setStateAndCache(
+          latest.copyWith(
+            messages: _upsertMessage(latest.messages, failedMessage),
+          ),
+        );
+        try {
+          ref
+              .read(chatOverviewControllerProvider.notifier)
+              .applyFailedOutboxMessage(arg, tempMessage.id, error.toString());
+        } catch (_) {}
+        rethrow;
+      }
+    } finally {
+      keepAliveLink.close();
+    }
   }
 
   Future<void> sendFile(
     String filePath, {
     Uint8List? fileBytes,
     String? sourceFileName,
+    String? content,
     String? replyToMessageId,
     String? customFileName,
     Map<String, dynamic>? metadata,
+    String? transferId,
+    CancelToken? cancelToken,
     void Function(int sent, int total)? onProgress,
   }) async {
-    _socketService?.markActivity();
-    final result = await _guardAuth(
-      () => _repository().sendFileMessage(
+    final keepAliveLink = ref.keepAlive();
+    try {
+      _socketService?.markActivity();
+      if (state.valueOrNull == null) {
+        try {
+          await future;
+        } catch (_) {}
+      }
+
+      final resolvedFileName = customFileName?.trim().isNotEmpty == true
+          ? customFileName!.trim()
+          : (sourceFileName?.trim().isNotEmpty == true
+              ? sourceFileName!.trim()
+              : (filePath.isNotEmpty ? p.basename(filePath) : 'ملف مرفق'));
+
+      final ext = resolvedFileName.contains('.')
+          ? resolvedFileName.split('.').last.toLowerCase()
+          : '';
+      final isImage = ext == 'png' ||
+          ext == 'jpg' ||
+          ext == 'jpeg' ||
+          ext == 'gif' ||
+          ext == 'webp' ||
+          ext == 'bmp';
+      final isPdf = ext == 'pdf';
+      final isAudio = ext == 'mp3' ||
+          ext == 'wav' ||
+          ext == 'm4a' ||
+          ext == 'aac' ||
+          ext == 'ogg';
+      final effectiveMessageType = isImage
+          ? 'image'
+          : (isPdf ? 'pdf' : (isAudio ? 'audio' : 'file'));
+
+      int? fileSize = fileBytes?.length;
+      if ((fileSize == null || fileSize <= 0) && filePath.isNotEmpty && !kIsWeb) {
+        try {
+          final f = File(filePath);
+          if (f.existsSync()) {
+            fileSize = f.lengthSync();
+          }
+        } catch (_) {}
+      }
+
+      final stableClientMessageId =
+          'file_${DateTime.now().microsecondsSinceEpoch}_${(1000 + (DateTime.now().millisecond * 7)) % 9999}';
+
+      String effectiveFilePath = filePath;
+      if (kIsWeb &&
+          web_bridge.isElectron() &&
+          fileBytes != null &&
+          fileBytes.isNotEmpty) {
+        try {
+          final cachedDiskPath = await web_bridge.cacheElectronChatAttachment(
+            messageId: stableClientMessageId,
+            fileName: resolvedFileName,
+            bytes: fileBytes,
+          );
+          if (cachedDiskPath != null && cachedDiskPath.isNotEmpty) {
+            effectiveFilePath = cachedDiskPath;
+          }
+        } catch (_) {}
+      }
+
+      final currentUser = ref.read(currentUserProvider);
+      final currentUserId =
+          ref.read(authControllerProvider).valueOrNull?.id ?? '';
+      final tempCreatedAt = DateTime.now();
+
+      final isOffline = _socketService != null && !_socketService!.isConnected;
+      final effectiveMetadata = <String, dynamic>{
+        ...?metadata,
+        'clientMessageId': stableClientMessageId,
+        'status': isOffline ? 'pending' : 'uploading',
+        'progress': 0.0,
+        if (effectiveFilePath.isNotEmpty) 'localFilePath': effectiveFilePath,
+      };
+
+      final tempMessage = ChatMessage(
+        id: 'temp_$stableClientMessageId',
         conversationId: arg,
-        filePath: filePath,
-        fileBytes: fileBytes,
-        sourceFileName: sourceFileName,
+        senderId: currentUserId,
+        sender: currentUser != null
+            ? ChatDirectoryUser(
+                id: currentUser.id,
+                username: currentUser.username,
+                fullName: currentUser.fullName,
+                jobTitle: currentUser.jobTitle,
+                role: currentUser.role,
+                departmentId: currentUser.departmentId,
+                departmentIds: currentUser.allDepartmentIds,
+                branchId: currentUser.branchId,
+                branchCode: currentUser.branchCode,
+                isOnline: currentUser.isOnline,
+                presenceStatus: currentUser.presenceStatus,
+                isActive: currentUser.isActive,
+                avatarUrl: currentUser.avatarUrl,
+                lastSeen: currentUser.lastSeen,
+                lastActiveAt: currentUser.lastActiveAt,
+              )
+            : null,
+        content: content ?? '',
+        messageType: effectiveMessageType,
+        fileUrl: null,
+        fileName: resolvedFileName,
+        fileSize: fileSize != null && fileSize > 0 ? fileSize : null,
+        mimeType: null,
         replyToMessageId: replyToMessageId,
-        customFileName: customFileName,
-        metadata: metadata,
-        onProgress: onProgress,
-      ),
-    );
-    final current =
-        state.valueOrNull ??
-        const ConversationMessagesState(
-          messages: [],
-          nextCursor: null,
-          hasMore: false,
-          isLoadingMore: false,
+        isDeleted: false,
+        metadata: effectiveMetadata,
+        createdAt: tempCreatedAt,
+        updatedAt: tempCreatedAt,
+        seenBy: const [],
+        deliveredTo: const [],
+      );
+
+      final current = state.valueOrNull ??
+          const ConversationMessagesState(
+            messages: [],
+            nextCursor: null,
+            hasMore: false,
+            isLoadingMore: false,
+          );
+
+      // Optimistic insert: appears in the chat bubbles immediately
+      _setStateAndCache(
+        current.copyWith(
+          messages: _upsertMessage(current.messages, tempMessage),
+        ),
+        immediate: true,
+      );
+
+      try {
+        ref
+            .read(chatOverviewControllerProvider.notifier)
+            .updateLastMessageOptimistically(arg, tempMessage);
+      } catch (_) {}
+
+      // Cache preview bytes for instant offline image thumbnail
+      if (fileBytes != null && fileBytes.isNotEmpty) {
+        unawaited(_repository().cacheAttachmentPreviewBytes(tempMessage, fileBytes));
+      } else if (!kIsWeb && filePath.isNotEmpty && isImage) {
+        try {
+          final f = File(filePath);
+          if (f.existsSync()) {
+            unawaited(_repository().cacheAttachmentPreviewBytes(tempMessage, f.readAsBytesSync()));
+          }
+        } catch (_) {}
+      }
+
+      int lastProgressUpdate = 0;
+      void handleProgress(int sent, int total) {
+        onProgress?.call(sent, total);
+        final fraction =
+            total <= 0 ? 0.0 : (sent / total).clamp(0.0, 1.0).toDouble();
+        final now = DateTime.now().millisecondsSinceEpoch;
+        if (now - lastProgressUpdate > 120 || fraction >= 1.0) {
+          lastProgressUpdate = now;
+          final cur = state.valueOrNull;
+          if (cur != null) {
+            final idx = cur.messages.indexWhere((m) => m.id == tempMessage.id);
+            if (idx != -1) {
+              final existing = cur.messages[idx];
+              final nextMeta = Map<String, dynamic>.from(existing.metadata ?? {});
+              nextMeta['progress'] = fraction;
+              final updated = existing.copyWith(metadata: nextMeta);
+              final nextList = List<ChatMessage>.from(cur.messages);
+              nextList[idx] = updated;
+              _setStateAndCache(cur.copyWith(messages: nextList));
+            }
+          }
+        }
+      }
+
+      final outbox = _outbox();
+      try {
+        final result = await _guardAuth(
+          () => _repository().sendFileMessage(
+            conversationId: arg,
+            filePath: effectiveFilePath,
+            fileBytes: (effectiveFilePath != filePath && effectiveFilePath.isNotEmpty) ? null : fileBytes,
+            sourceFileName: sourceFileName,
+            content: content,
+            replyToMessageId: replyToMessageId,
+            customFileName: customFileName,
+            metadata: metadata,
+            transferId: transferId,
+            cancelToken: cancelToken,
+            onProgress: handleProgress,
+          ),
         );
-    _setStateAndCache(
-      current.copyWith(
-        messages: _upsertMessage(current.messages, result.message),
-      ),
-    );
+
+        final confirmedMetadata = Map<String, dynamic>.from(
+          result.message.metadata ?? const {},
+        );
+        confirmedMetadata['clientMessageId'] = stableClientMessageId;
+        confirmedMetadata.remove('status');
+        confirmedMetadata.remove('progress');
+        confirmedMetadata.remove('error');
+        if (filePath.isNotEmpty) confirmedMetadata['localFilePath'] = filePath;
+
+        final confirmedMessage = result.message.copyWith(
+          metadata: confirmedMetadata.isEmpty ? null : confirmedMetadata,
+        );
+
+        final latest = state.valueOrNull ?? current;
+        final updatedList = latest.messages
+            .where((m) => m.id != tempMessage.id && m.id != confirmedMessage.id)
+            .toList();
+        updatedList.insert(0, confirmedMessage);
+
+        _setStateAndCache(
+          latest.copyWith(messages: updatedList),
+          immediate: true,
+        );
+        try {
+          ref
+              .read(chatOverviewControllerProvider.notifier)
+              .applyConfirmedOutboxMessage(arg, tempMessage.id, confirmedMessage);
+        } catch (_) {}
+        await outbox.remove(stableClientMessageId);
+      } catch (error) {
+        final isCancelled = (cancelToken?.isCancelled ?? false) ||
+            (error is DioException && error.type == DioExceptionType.cancel) ||
+            error.toString().contains('إلغاء') ||
+            error.toString().toLowerCase().contains('cancel');
+
+        if (isCancelled) {
+          final latest = state.valueOrNull ?? current;
+          final updatedList = latest.messages
+              .where((m) => m.id != tempMessage.id)
+              .toList();
+          _setStateAndCache(
+            latest.copyWith(messages: updatedList),
+            immediate: true,
+          );
+          await outbox.remove(stableClientMessageId);
+          try {
+            ref
+                .read(chatOverviewControllerProvider.notifier)
+                .removePendingOutboxMessage(arg, tempMessage.id);
+          } catch (_) {}
+          debugPrint('[Chat] Upload cancelled by user for $resolvedFileName');
+          return;
+        }
+        final isNetErr = isNetworkOrOfflineError(error) ||
+            (_socketService != null && !_socketService!.isConnected);
+
+        if (isNetErr && effectiveFilePath.isNotEmpty) {
+          // File upload failed due to network / VPN drop or offline state!
+          // Add to persistent Outbox queue so it will auto-upload when network is restored!
+          final outboxItem = ChatOutboxItem(
+            clientMessageId: stableClientMessageId,
+            conversationId: arg,
+            content: content ?? '',
+            messageType: effectiveMessageType,
+            localFilePath: effectiveFilePath,
+            fileName: resolvedFileName,
+            sourceFileName: sourceFileName,
+            customFileName: customFileName,
+            replyToMessageId: replyToMessageId,
+            metadata: effectiveMetadata,
+          );
+          await outbox.enqueue(outboxItem);
+          debugPrint('[Chat] File $resolvedFileName queued in outbox for auto-upload upon reconnection.');
+          return;
+        }
+
+        final failedMetadata = Map<String, dynamic>.from(effectiveMetadata);
+        failedMetadata['status'] = 'failed';
+        failedMetadata['error'] = error.toString();
+        final failedMessage = tempMessage.copyWith(metadata: failedMetadata);
+        final latest = state.valueOrNull ?? current;
+        _setStateAndCache(
+          latest.copyWith(
+            messages: _upsertMessage(latest.messages, failedMessage),
+          ),
+          immediate: true,
+        );
+        try {
+          ref
+              .read(chatOverviewControllerProvider.notifier)
+              .applyFailedOutboxMessage(arg, tempMessage.id, error.toString());
+        } catch (_) {}
+        rethrow;
+      }
+    } finally {
+      keepAliveLink.close();
+    }
+  }
+
+  void cancelPendingUpload(String clientMessageId) {
+    final tempId = clientMessageId.startsWith('temp_')
+        ? clientMessageId
+        : 'temp_$clientMessageId';
+    final pureClientMsgId = clientMessageId.startsWith('temp_')
+        ? clientMessageId.substring(5)
+        : clientMessageId;
+
+    final cur = state.valueOrNull;
+    if (cur != null) {
+      final updatedList = cur.messages
+          .where((m) =>
+              m.id != tempId &&
+              m.metadata?['clientMessageId'] != pureClientMsgId)
+          .toList();
+      _setStateAndCache(
+        cur.copyWith(messages: updatedList),
+        immediate: true,
+      );
+    }
+    unawaited(_outbox().remove(pureClientMsgId));
+    try {
+      ref
+          .read(chatOverviewControllerProvider.notifier)
+          .removePendingOutboxMessage(arg, tempId);
+    } catch (_) {}
+  }
+
+  Future<void> retryMessage(ChatMessage message) async {
+    final clientMessageId = message.metadata?['clientMessageId']?.toString() ??
+        (message.id.startsWith('temp_') ? message.id.substring(5) : null);
+
+    final cleanMetadata = Map<String, dynamic>.from(message.metadata ?? {});
+    cleanMetadata.remove('error');
+    cleanMetadata.remove('progress');
+    cleanMetadata['status'] = message.hasAttachment ? 'uploading' : 'pending';
+
+    final updatedMsg = message.copyWith(metadata: cleanMetadata);
+    final current = state.valueOrNull;
+    if (current != null) {
+      _setStateAndCache(
+        current.copyWith(
+          messages: _upsertMessage(current.messages, updatedMsg),
+        ),
+        immediate: true,
+      );
+    }
+
+    final localPath = message.metadata?['localFilePath']?.toString();
+    try {
+      if (message.hasAttachment && localPath != null && localPath.isNotEmpty) {
+        await sendFile(
+          localPath,
+          sourceFileName: message.fileName,
+          customFileName: message.fileName,
+          content: message.content.isNotEmpty ? message.content : null,
+          replyToMessageId: message.replyToMessageId,
+          metadata: cleanMetadata,
+        );
+        return;
+      }
+
+      await sendMessage(
+        content: message.content,
+        replyToMessageId: message.replyToMessageId,
+        messageType: message.messageType,
+        fileUrl: message.fileUrl,
+        metadata: cleanMetadata,
+        clientMessageId: clientMessageId,
+      );
+    } catch (_) {
+      // Handled inside sendFile / sendMessage which updates metadata to failed
+    }
   }
 
   Future<void> editMessage({
@@ -1681,14 +3052,40 @@ class ConversationMessagesController
   }
 
   Future<void> deleteMessage(String messageId) async {
+    final current = state.valueOrNull;
+    if (current == null) {
+      return;
+    }
+    final targetIndex = current.messages.indexWhere((m) => m.id == messageId);
+    final target = targetIndex != -1 ? current.messages[targetIndex] : null;
+    final isFailedOrTemp = messageId.startsWith('temp_') ||
+        target?.metadata?['status'] == 'failed';
+
+    if (isFailedOrTemp) {
+      _setStateAndCache(
+        current.copyWith(
+          messages: current.messages.where((m) => m.id != messageId).toList(),
+        ),
+      );
+      return;
+    }
     await _guardAuth(() => _repository().removeMessage(messageId));
+    final latest = state.valueOrNull ?? current;
+    _setStateAndCache(
+      latest.copyWith(
+        messages: _markMessageDeleted(latest.messages, messageId),
+      ),
+    );
+  }
+
+  Future<void> deleteFailedMessage(String messageId) async {
     final current = state.valueOrNull;
     if (current == null) {
       return;
     }
     _setStateAndCache(
       current.copyWith(
-        messages: _markMessageDeleted(current.messages, messageId),
+        messages: current.messages.where((m) => m.id != messageId).toList(),
       ),
     );
   }
@@ -1811,6 +3208,19 @@ class ConversationMessagesController
     }
   }
 
+  Future<ChatMessage> togglePollStatus(String messageId) async {
+    final updated = await _guardAuth(
+      () => _repository().togglePollStatus(messageId),
+    );
+    final latest = state.valueOrNull;
+    if (latest != null) {
+      _setStateAndCache(
+        latest.copyWith(messages: _upsertMessage(latest.messages, updated)),
+      );
+    }
+    return updated;
+  }
+
   Future<ChatSearchResult> searchMessages(String query, {String? cursor}) {
     return _guardAuth(
       () => _repository().searchMessages(
@@ -1834,6 +3244,8 @@ class ConversationMessagesController
   void sendTyping() => _socketService?.sendTyping(arg);
   void stopTyping() => _socketService?.stopTyping(arg);
 
+  Timer? _messagesCacheDebounceTimer;
+
   Future<void> _saveStateToCache(ConversationMessagesState data) async {
     try {
       final jsonList = data.messages.map((m) => m.toJson()).toList();
@@ -1844,8 +3256,69 @@ class ConversationMessagesController
     } catch (_) {}
   }
 
-  void _setStateAndCache(ConversationMessagesState data) {
+  void _setStateAndCache(ConversationMessagesState data, {bool immediate = false}) {
     state = AsyncData(data);
-    _saveStateToCache(data);
+    _messagesCacheDebounceTimer?.cancel();
+    if (immediate) {
+      _saveStateToCache(data);
+    } else {
+      _messagesCacheDebounceTimer = Timer(const Duration(seconds: 4), () {
+        _saveStateToCache(data);
+      });
+    }
   }
+}
+
+List<ChatMessage> sortAndDedupeChatMessages(Iterable<ChatMessage> source) {
+  final byKey = <String, ChatMessage>{};
+  final idToKey = <String, String>{};
+
+  for (final message in source) {
+    final clientMsgId = message.metadata?['clientMessageId']?.toString();
+    final hasRealId = message.id.isNotEmpty && !message.id.startsWith('temp_');
+
+    String? matchedKey;
+    if (hasRealId && idToKey.containsKey(message.id)) {
+      matchedKey = idToKey[message.id];
+    } else if (clientMsgId != null &&
+        clientMsgId.isNotEmpty &&
+        byKey.containsKey('client_$clientMsgId')) {
+      matchedKey = 'client_$clientMsgId';
+    } else if (hasRealId && byKey.containsKey('id_${message.id}')) {
+      matchedKey = 'id_${message.id}';
+    }
+
+    final key = matchedKey ??
+        ((clientMsgId != null && clientMsgId.isNotEmpty)
+            ? 'client_$clientMsgId'
+            : 'id_${message.id}');
+
+    final existing = byKey[key];
+    if (existing == null) {
+      byKey[key] = message;
+    } else {
+      final existingIsTemp = existing.id.startsWith('temp_');
+      final messageIsTemp = message.id.startsWith('temp_');
+      if (existingIsTemp && !messageIsTemp) {
+        byKey[key] = message;
+      } else if (!existingIsTemp && messageIsTemp) {
+        // Keep confirmed server message
+      } else {
+        byKey[key] = message;
+      }
+    }
+
+    if (hasRealId) {
+      idToKey[message.id] = key;
+    }
+  }
+  final items = byKey.values.toList();
+  items.sort((a, b) {
+    final byCreatedAt = b.createdAt.compareTo(a.createdAt);
+    if (byCreatedAt != 0) {
+      return byCreatedAt;
+    }
+    return b.id.compareTo(a.id);
+  });
+  return items;
 }

@@ -21,6 +21,12 @@ const userSchema = new mongoose.Schema(
       trim: true,
       maxlength: 120,
     },
+    jobTitle: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: 150,
+    },
     role: {
       type: String,
       required: true,
@@ -106,6 +112,13 @@ const userSchema = new mongoose.Schema(
           {
             deviceUid: { type: String, required: true },
             nonce: { type: String, required: true },
+            previousNonce: { type: String, default: null },
+            previousNonceExpiresAt: { type: Date, default: null },
+            deviceName: { type: String, default: null },
+            platform: { type: String, default: null },
+            appVersion: { type: String, default: null },
+            ipAddress: { type: String, default: null },
+            userAgent: { type: String, default: null },
             createdAt: { type: Date, default: Date.now },
             lastUsedAt: { type: Date, default: Date.now },
           },
@@ -125,10 +138,13 @@ const userSchema = new mongoose.Schema(
         {
           themeId: { type: String, default: "system" },
           wallpaperId: { type: String, default: "default" },
+          doodles: { type: Boolean, default: true },
+          unreadBadgeColorHex: { type: String, default: "#E53935" },
           customTheme: {
             type: new mongoose.Schema(
               {
                 accentColorHex: { type: String, default: "#3390EC" },
+                unreadBadgeColorHex: { type: String, default: "#E53935" },
                 outgoingBubbleColorHexes: {
                   type: [String],
                   default: () => ["#5BA9FF", "#2F8CFF"],
@@ -146,6 +162,7 @@ const userSchema = new mongoose.Schema(
             ),
             default: () => ({
               accentColorHex: "#3390EC",
+              unreadBadgeColorHex: "#E53935",
               outgoingBubbleColorHexes: ["#5BA9FF", "#2F8CFF"],
               incomingBubbleColorHex: "#182533",
               wallpaperColorHexes: ["#0E1621", "#111B26", "#17212B"],
@@ -157,8 +174,10 @@ const userSchema = new mongoose.Schema(
       default: () => ({
         themeId: "system",
         wallpaperId: "default",
+        unreadBadgeColorHex: "#E53935",
         customTheme: {
           accentColorHex: "#3390EC",
+          unreadBadgeColorHex: "#E53935",
           outgoingBubbleColorHexes: ["#5BA9FF", "#2F8CFF"],
           incomingBubbleColorHex: "#182533",
           wallpaperColorHexes: ["#0E1621", "#111B26", "#17212B"],
@@ -169,10 +188,55 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 20,
     },
+    quickReplies: {
+      type: [
+        new mongoose.Schema(
+          {
+            id: { type: String, required: true },
+            shortcut: { type: String, required: true },
+            title: { type: String, required: true },
+            content: { type: String, required: true },
+            category: { type: String, default: "عام" },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
+    messageReminders: {
+      type: [
+        new mongoose.Schema(
+          {
+            id: { type: String, required: true },
+            userId: { type: String, default: "" },
+            conversationId: { type: String, required: true },
+            conversationTitle: { type: String, default: "" },
+            messageId: { type: String, required: true },
+            senderName: { type: String, default: "" },
+            messagePreview: { type: String, default: "" },
+            remindAt: { type: Date, required: true, index: true },
+            createdAt: { type: Date, default: Date.now },
+            note: { type: String, default: "" },
+            isNotified: { type: Boolean, default: false },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
+    workspaceDocs: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
   },
   {
     timestamps: true,
   },
 );
+
+userSchema.index({ isActive: 1, createdAt: -1 });
+userSchema.index({ isOnline: 1, presenceStatus: 1 });
+userSchema.index({ departmentIds: 1 });
+userSchema.index({ isActive: 1, fullName: 1, username: 1, _id: 1 });
 
 module.exports = mongoose.model("User", userSchema);

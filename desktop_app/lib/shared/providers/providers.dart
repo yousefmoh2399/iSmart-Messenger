@@ -23,6 +23,7 @@ import '../../features/auth/data/auth_session_manager.dart';
 import '../../features/auth/data/session_store.dart';
 import '../../features/auth/presentation/auth_controller.dart';
 import '../../features/chat/data/chat_local_cache.dart';
+import '../../features/chat/data/chat_outbox_service.dart';
 import '../../features/chat/data/chat_repository.dart';
 import '../../features/chat/data/chat_socket_service.dart';
 import '../../features/chat/models/chat_models.dart';
@@ -92,9 +93,7 @@ class ServerConnectionState {
 class ServerConnectionController extends AsyncNotifier<ServerConnectionState> {
   @override
   Future<ServerConnectionState> build() async {
-    final baseUrl =
-        ref.watch(apiBaseUrlControllerProvider).valueOrNull ??
-        AppConfig.defaultApiBaseUrl;
+    final baseUrl = await ref.watch(apiBaseUrlControllerProvider.future);
     return _check(baseUrl);
   }
 
@@ -295,6 +294,11 @@ class UserPreferencesController extends AsyncNotifier<UserPreferences> {
     final current = state.valueOrNull ?? UserPreferences.defaults();
     await savePreferences(current.copyWith(notificationToneId: value));
   }
+  Future<void> setNotificationDisplayMode(String value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(notificationDisplayModeId: value));
+  }
+
 }
 
 final apiBaseUrlStoreProvider = Provider<ApiBaseUrlStore>(
@@ -394,6 +398,10 @@ final authSessionManagerProvider = Provider<AuthSessionManager>((ref) {
         ref.invalidate(ticketsControllerProvider);
         ref.invalidate(closedTicketsControllerProvider);
         ref.invalidate(printerControllerProvider);
+
+        try {
+          ref.read(authControllerProvider.notifier).logout();
+        } catch (_) {}
       });
     },
   );
@@ -436,7 +444,18 @@ final chatRepositoryProvider = Provider<ChatRepository>((ref) {
     ref.watch(userPreferencesControllerProvider).valueOrNull ??
         UserPreferences.defaults(),
     ref.watch(chatLocalCacheProvider),
+    socketService: ref.watch(chatSocketServiceProvider),
   );
+});
+
+final chatOutboxServiceProvider = Provider<ChatOutboxService>((ref) {
+  final service = ChatOutboxService(
+    repository: ref.watch(chatRepositoryProvider),
+    cache: ref.watch(chatLocalCacheProvider),
+    socketService: ref.watch(chatSocketServiceProvider),
+  );
+  ref.onDispose(service.dispose);
+  return service;
 });
 
 final ticketRepositoryProvider = Provider<TicketRepository>((ref) {
@@ -547,12 +566,22 @@ final cachedAppServerDefaultsProvider = FutureProvider<AppServerDefaults>((
 });
 
 final appSettingsSocketSyncProvider = Provider<void>((ref) {
+  DateTime? lastSocketSyncAt;
   final subscription = ref.read(chatSocketServiceProvider).events.listen((
     event,
   ) {
-    if (event.type == 'app_settings_updated' ||
-        event.type == 'socket_connected') {
+    if (event.type == 'app_settings_updated') {
+      lastSocketSyncAt = DateTime.now();
       ref.read(appSettingsRevisionProvider.notifier).state++;
+      return;
+    }
+    if (event.type == 'socket_connected') {
+      final now = DateTime.now();
+      if (lastSocketSyncAt == null ||
+          now.difference(lastSocketSyncAt!) >= const Duration(minutes: 5)) {
+        lastSocketSyncAt = now;
+        ref.read(appSettingsRevisionProvider.notifier).state++;
+      }
     }
   });
   ref.onDispose(subscription.cancel);
@@ -577,30 +606,50 @@ final desktopUpdateAgentProvider = Provider<DesktopUpdateAgent>((ref) {
 
 final chatAppVisibilityProvider = StateProvider<bool>((ref) => true);
 
+final chatAppForegroundProvider = StateProvider<bool>((ref) => true);
+
 final chatSectionVisibleProvider = StateProvider<bool>((ref) => true);
 
 final activeConversationIdProvider = StateProvider<String?>((ref) => null);
 
 final chatSocketConnectionProvider = FutureProvider<void>((ref) async {
   ref.watch(appSettingsSocketSyncProvider);
-  final authState = ref.watch(authControllerProvider);
+  final authUserId = ref.watch(
+    authControllerProvider.select((state) => state.valueOrNull?.id),
+  );
+  final authStatus = ref.watch(
+    authControllerProvider.select((state) => state.status),
+  );
   ref.watch(serverRecoveryRevisionProvider);
-  final authUser = authState.user;
   final socketService = ref.read(chatSocketServiceProvider);
-
-  if (authState.status == AuthStatus.initializing) {
+  if (authStatus == AuthStatus.initializing) {
     return;
   }
 
-  final token = await ref.watch(authTokenProvider.future);
-  if (authUser == null || token == null || token.isEmpty) {
+  String? lastAppliedToken;
+  ref.listen<AsyncValue<String?>>(authTokenProvider, (_, next) {
+    if (lastAppliedToken == null || next.isLoading || !next.hasValue) {
+      return;
+    }
+    final nextToken = next.valueOrNull?.trim() ?? '';
+    if (nextToken.isEmpty || nextToken == lastAppliedToken) {
+      return;
+    }
+    lastAppliedToken = nextToken;
+    if (socketService.isConnected) {
+      socketService.updateAuthToken(nextToken);
+    } else if (authUserId != null && authUserId.isNotEmpty) {
+      ref.invalidateSelf();
+    }
+  });
+
+  final baseUrl = await ref.watch(apiBaseUrlControllerProvider.future);
+  final token = await ref.read(authTokenProvider.future);
+  if (authUserId == null || authUserId.isEmpty || token == null || token.isEmpty) {
     socketService.disconnect();
     return;
   }
-
-  final baseUrl =
-      ref.watch(apiBaseUrlControllerProvider).valueOrNull ??
-      AppConfig.defaultApiBaseUrl;
+  lastAppliedToken = token.trim();
 
   try {
     await socketService.connect(
@@ -665,7 +714,8 @@ final appBootstrapProvider = FutureProvider<BootstrapStatus>((ref) async {
     try {
       final defaults = await ref
           .read(publicAppSettingsServiceProvider)
-          .fetchDefaults();
+          .fetchDefaults()
+          .timeout(const Duration(seconds: 4));
       final desktopBaseUrl = defaults.desktopBaseUrl?.trim();
       if (desktopBaseUrl != null && desktopBaseUrl.isNotEmpty) {
         await ref
@@ -674,7 +724,7 @@ final appBootstrapProvider = FutureProvider<BootstrapStatus>((ref) async {
       }
     } catch (_) {}
 
-    await ref.read(authControllerProvider.notifier).initializeAuth();
+    await ref.read(authControllerProvider.notifier).initializeAuth().timeout(const Duration(seconds: 6), onTimeout: () {});
 
     return BootstrapStatus.ready;
   } catch (_) {
@@ -694,6 +744,27 @@ final authTokenProvider = FutureProvider<String?>((ref) async {
   ref.watch(authCredentialsRevisionProvider);
   return ref.read(authRepositoryProvider).getValidToken();
 });
+
+/// Checks whether a user session and token are active without subscribing
+/// callers to silent JWT refresh revisions ([authCredentialsRevisionProvider]).
+Future<bool> waitForAuthenticatedSession(
+  Ref ref, {
+  bool listen = false,
+}) async {
+  final authUserId = listen
+      ? ref.watch(currentUserProvider.select((u) => u?.id))
+      : ref.read(currentUserProvider)?.id;
+  if (authUserId == null || authUserId.isEmpty) {
+    return false;
+  }
+  final token = await ref.read(authTokenProvider.future);
+  if (token == null ||
+      token.trim().isEmpty ||
+      token.trim().toLowerCase() == 'null') {
+    return false;
+  }
+  return true;
+}
 
 
 
