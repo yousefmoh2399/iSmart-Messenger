@@ -15,6 +15,7 @@ class LocalNotificationService {
 
   static const MethodChannel _windowChannel = MethodChannel('dbacd_hub/window');
   static const _notificationToneIdKey = 'prefs_notification_tone_id';
+  static const _notificationDisplayModeKey = 'prefs_notification_display_mode';
   static const _legacyNotificationToneIdKey = 'notificationToneId';
   static const _androidChannelId = 'chat_messages_v2';
 
@@ -56,36 +57,71 @@ class LocalNotificationService {
     bool requestAttention = true,
   }) async {
     await initialize();
+    final displayMode = await _loadDisplayMode();
+
     if (kIsWeb) {
       final tone = await _loadSelectedTone();
       final soundAssetPath = tone.isSilent ? null : tone.assetPath;
       if (!web_bridge.isElectron() && soundAssetPath != null) {
         await _playNotificationTone();
       }
+      if (web_bridge.isElectron() &&
+          soundAssetPath != null &&
+          displayMode == NotificationDisplayMode.soundOnly) {
+        await _playNotificationTone();
+      }
+
+      if (displayMode == NotificationDisplayMode.soundOnly) {
+        if (!web_bridge.isElectron()) {
+          web_bridge.showBrowserAttention('رسالة جديدة');
+        }
+        return;
+      }
+
+      final effectiveTitle = displayMode == NotificationDisplayMode.hideDetails
+          ? (appName.isEmpty ? 'iSmart Messenger' : appName)
+          : (title.isEmpty ? appName : title);
+      final effectiveBody = displayMode == NotificationDisplayMode.hideDetails
+          ? 'لديك رسالة جديدة'
+          : (body.isEmpty ? 'لديك رسالة جديدة' : body);
+
       await web_bridge.showBrowserNotification(
-        title: title.isEmpty ? appName : title,
-        body: body.isEmpty ? 'لديك رسالة جديدة' : body,
+        title: effectiveTitle,
+        body: effectiveBody,
         silent: true,
         soundAssetPath: soundAssetPath,
       );
       return;
     }
+
     if (requestAttention) {
       await _requestWindowAttention();
     }
+
+    await _playNotificationTone();
+
+    if (displayMode == NotificationDisplayMode.soundOnly) {
+      return;
+    }
+
     if (_disabled) {
       return;
     }
 
-    await _playNotificationTone();
+    final effectiveTitle = displayMode == NotificationDisplayMode.hideDetails
+        ? (appName.isEmpty ? 'iSmart Messenger' : appName)
+        : (title.isEmpty ? appName : title);
+    final effectiveBody = displayMode == NotificationDisplayMode.hideDetails
+        ? 'لديك رسالة جديدة'
+        : (body.isEmpty ? 'لديك رسالة جديدة' : body);
 
     final details = await _buildNotificationDetails();
 
     try {
       await _plugin.show(
         _nextId++,
-        title.isEmpty ? appName : title,
-        body.isEmpty ? 'لديك رسالة جديدة' : body,
+        effectiveTitle,
+        effectiveBody,
         details,
       );
     } catch (_) {
@@ -198,6 +234,13 @@ class LocalNotificationService {
         'playSound': false,
       });
     } catch (_) {}
+  }
+
+  
+  Future<NotificationDisplayMode> _loadDisplayMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final modeId = prefs.getString(_notificationDisplayModeKey);
+    return NotificationDisplayMode.fromId(modeId);
   }
 
   Future<NotificationTone> _loadSelectedTone() async {

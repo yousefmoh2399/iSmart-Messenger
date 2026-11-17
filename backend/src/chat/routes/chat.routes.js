@@ -3,6 +3,7 @@ const rateLimit = require("express-rate-limit");
 const { body, param, query } = require("express-validator");
 const { chatUpload } = require("../utils/chat-upload");
 const { chatTransferUpload } = require("../utils/chat-transfer-upload");
+const { conversationAvatarUpload } = require("../utils/conversation-avatar-upload");
 const {
   getChatDirectoryUsers,
   getChatRoles,
@@ -10,6 +11,9 @@ const {
   getManageableConversations,
   createChatConversation,
   updateChatConversation,
+  uploadConversationAvatar,
+  deleteConversationAvatar,
+  downloadConversationAvatar,
   updateChatConversationPreferences,
   setGroupPinnedMessage,
   clearGroupPinnedMessage,
@@ -33,6 +37,7 @@ const {
   markSeen,
   markSingleMessageSeen,
   removeMessage,
+  sendScheduledMessage,
   searchChatMessages,
   getFavoriteChatMessages,
   getPresence,
@@ -41,6 +46,7 @@ const {
   requestAttachmentRestore,
   restoreAttachment,
   votePoll,
+  togglePoll,
   exportPoll,
   postChatTransfer,
   downloadChatTransfer,
@@ -54,13 +60,21 @@ const router = express.Router();
 
 const messageLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 60,
+  max: 180,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => req.user?._id?.toString() || req.ip,
   message: {
     message: "تم تجاوز عدد الرسائل المسموح في الدقيقة. حاول مرة أخرى بعد قليل.",
   },
 });
+
+router.get(
+  "/conversations/:id/avatar",
+  [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
+  validateRequest,
+  downloadConversationAvatar,
+);
 
 router.use(requireAuth);
 
@@ -114,11 +128,27 @@ router.put(
   updateChatConversation,
 );
 
+router.post(
+  "/conversations/:id/avatar",
+  [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
+  validateRequest,
+  conversationAvatarUpload.single("avatar"),
+  uploadConversationAvatar,
+);
+
+router.delete(
+  "/conversations/:id/avatar",
+  [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
+  validateRequest,
+  deleteConversationAvatar,
+);
+
 router.patch(
   "/conversations/:id/preferences",
   [
     param("id").isMongoId().withMessage("معرّف المحادثة غير صالح."),
     body("isMuted").optional().isBoolean(),
+    body("mutedUntil").optional({ nullable: true }).isISO8601().toDate(),
     body("isArchived").optional().isBoolean(),
     body("isPinned").optional().isBoolean(),
     body("isFavorite").optional().isBoolean(),
@@ -319,6 +349,14 @@ router.patch(
   markSingleMessageSeen,
 );
 
+router.patch(
+  "/messages/:id/poll/toggle",
+  requireAuth,
+  [param("id").isMongoId().withMessage("معرّف الرسالة غير صالح.")],
+  validateRequest,
+  togglePoll,
+);
+
 router.post(
   "/messages/:id/poll/vote",
   [
@@ -341,6 +379,13 @@ router.delete(
   [param("id").isMongoId().withMessage("معرّف الرسالة غير صالح.")],
   validateRequest,
   removeMessage,
+);
+
+router.post(
+  "/messages/:id/send-now",
+  [param("id").isMongoId().withMessage("معرّف الرسالة غير صالح.")],
+  validateRequest,
+  sendScheduledMessage,
 );
 
 router.post(
@@ -467,5 +512,17 @@ router.delete(
   validateRequest,
   removeFolder,
 );
+
+const {
+  getMyStickers,
+  putMyStickers,
+  postMySticker,
+  deleteMySticker,
+} = require("../controllers/user-stickers.controller");
+
+router.get("/stickers", getMyStickers);
+router.put("/stickers", putMyStickers);
+router.post("/stickers", postMySticker);
+router.delete("/stickers/:id", deleteMySticker);
 
 module.exports = router;

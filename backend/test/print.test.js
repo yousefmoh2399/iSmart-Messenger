@@ -80,3 +80,61 @@ test("print-job-store: failed to processing (retry) increases retryCount", () =>
     store.validateAndTransition(jobId, "submitted");
   }, /Invalid print job state transition/);
 });
+
+test("printer reports: calculateMonthlyConsumption retains requested fromMonth and fromYear", async () => {
+  const Printer = require("../src/printers/models/printer.model");
+  const origFind = Printer.find;
+  Printer.find = () => ({
+    populate: () => ({
+      lean: async () => [],
+    }),
+  });
+
+  try {
+    const { calculateMonthlyConsumption } = require("../src/printers/services/printer.service");
+    // Test with a past month (e.g. Month 5 of 2025)
+    const result = await calculateMonthlyConsumption({
+      fromMonth: 5,
+      fromYear: 2025,
+      toMonth: 5,
+      toYear: 2025,
+    });
+
+    assert.equal(result.year, 2025);
+    assert.equal(result.month, 5);
+    assert.equal(result.months.length, 1);
+    assert.equal(result.months[0].year, 2025);
+    assert.equal(result.months[0].month, 5);
+  } finally {
+    Printer.find = origFind;
+  }
+});
+
+test("printer reports: calculateMonthlyConsumption retains multi-month range", async () => {
+  const Printer = require("../src/printers/models/printer.model");
+  const origFind = Printer.find;
+  Printer.find = () => ({
+    populate: () => ({
+      lean: async () => [],
+    }),
+  });
+
+  try {
+    const { calculateMonthlyConsumption } = require("../src/printers/services/printer.service");
+    const result = await calculateMonthlyConsumption({
+      fromMonth: 3,
+      fromYear: 2025,
+      toMonth: 5,
+      toYear: 2025,
+    });
+
+    assert.equal(result.year, 2025);
+    assert.equal(result.month, 0); // multi-month
+    assert.equal(result.months.length, 3);
+    assert.equal(result.months[0].month, 3);
+    assert.equal(result.months[1].month, 4);
+    assert.equal(result.months[2].month, 5);
+  } finally {
+    Printer.find = origFind;
+  }
+});

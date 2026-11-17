@@ -3,8 +3,10 @@ class AppUser {
     required this.id,
     required this.username,
     required this.fullName,
+    this.jobTitle = '',
     required this.role,
     required this.departmentId,
+    this.departmentIds = const [],
     required this.branchId,
     required this.branchCode,
     required this.isOnline,
@@ -21,9 +23,17 @@ class AppUser {
   final String id;
   final String username;
   final String fullName;
+  final String jobTitle;
   final String role;
   final String? departmentId;
+  final List<String> departmentIds;
   final String? branchId;
+
+  List<String> get allDepartmentIds {
+    if (departmentIds.isNotEmpty) return departmentIds;
+    if (departmentId != null && departmentId!.isNotEmpty) return [departmentId!];
+    return const [];
+  }
   final String branchCode;
   final bool isOnline;
   final String presenceStatus;
@@ -119,8 +129,12 @@ class AppUser {
       id: json['id'] as String,
       username: json['username'] as String,
       fullName: json['fullName'] as String? ?? '',
+      jobTitle: (json['jobTitle'] as String?)?.trim() ?? '',
       role: json['role'] as String? ?? 'user',
       departmentId: json['departmentId'] as String?,
+      departmentIds: (json['departmentIds'] as List<dynamic>? ?? const [])
+          .map((e) => e.toString())
+          .toList(),
       branchId: json['branchId'] as String?,
       branchCode: json['branchCode'] as String? ?? 'main',
       isOnline: json['isOnline'] as bool? ?? false,
@@ -146,8 +160,10 @@ class AppUser {
       'id': id,
       'username': username,
       'fullName': fullName,
+      'jobTitle': jobTitle,
       'role': role,
       'departmentId': departmentId,
+      'departmentIds': departmentIds,
       'branchId': branchId,
       'branchCode': branchCode,
       'isOnline': isOnline,
@@ -172,23 +188,34 @@ class ChatPreferences {
   static const defaults = ChatPreferences(
     themeId: 'system',
     wallpaperId: 'default',
+    doodles: true,
     customTheme: ChatCustomTheme.defaults,
     disableAnimatedEmojis: false,
+    unreadBadgeColorHex: '#E53935',
   );
 
   const ChatPreferences({
     required this.themeId,
     required this.wallpaperId,
+    this.doodles = true,
     required this.customTheme,
     this.disableAnimatedEmojis = false,
+    this.unreadBadgeColorHex = '#E53935',
   });
 
   final String themeId;
   final String wallpaperId;
+  final bool doodles;
   final ChatCustomTheme customTheme;
   final bool disableAnimatedEmojis;
+  final String unreadBadgeColorHex;
 
   factory ChatPreferences.fromJson(Map<String, dynamic>? json) {
+    final customThemeJson = json?['customTheme'] as Map<String, dynamic>?;
+    final fallbackUnread = _normalizeColorHex(
+      customThemeJson?['unreadBadgeColorHex'],
+      fallback: '#E53935',
+    );
     return ChatPreferences(
       themeId: (json?['themeId'] as String?)?.trim().isNotEmpty == true
           ? (json!['themeId'] as String).trim()
@@ -196,32 +223,46 @@ class ChatPreferences {
       wallpaperId: (json?['wallpaperId'] as String?)?.trim().isNotEmpty == true
           ? (json!['wallpaperId'] as String).trim()
           : 'default',
+      doodles: json?['doodles'] is bool ? json!['doodles'] as bool : true,
       customTheme: ChatCustomTheme.fromJson(
         json?['customTheme'] as Map<String, dynamic>?,
       ),
       disableAnimatedEmojis: json?['disableAnimatedEmojis'] == true,
+      unreadBadgeColorHex: _normalizeColorHex(
+        json?['unreadBadgeColorHex'],
+        fallback: fallbackUnread,
+      ),
     );
   }
 
   ChatPreferences copyWith({
     String? themeId,
     String? wallpaperId,
+    bool? doodles,
     ChatCustomTheme? customTheme,
     bool? disableAnimatedEmojis,
+    String? unreadBadgeColorHex,
   }) {
     return ChatPreferences(
       themeId: themeId ?? this.themeId,
       wallpaperId: wallpaperId ?? this.wallpaperId,
+      doodles: doodles ?? this.doodles,
       customTheme: customTheme ?? this.customTheme,
       disableAnimatedEmojis: disableAnimatedEmojis ?? this.disableAnimatedEmojis,
+      unreadBadgeColorHex: _normalizeColorHex(
+        unreadBadgeColorHex,
+        fallback: this.unreadBadgeColorHex,
+      ),
     );
   }
 
   Map<String, dynamic> toJson() => {
     'themeId': themeId,
     'wallpaperId': wallpaperId,
+    'doodles': doodles,
     'customTheme': customTheme.toJson(),
     'disableAnimatedEmojis': disableAnimatedEmojis,
+    'unreadBadgeColorHex': unreadBadgeColorHex,
   };
 }
 
@@ -231,6 +272,7 @@ class ChatCustomTheme {
     outgoingBubbleColorHexes: <String>['#5BA9FF', '#2F8CFF'],
     incomingBubbleColorHex: '#182533',
     wallpaperColorHexes: <String>['#0E1621', '#111B26', '#17212B'],
+    unreadBadgeColorHex: '#E53935',
   );
 
   const ChatCustomTheme({
@@ -238,12 +280,14 @@ class ChatCustomTheme {
     required this.outgoingBubbleColorHexes,
     required this.incomingBubbleColorHex,
     required this.wallpaperColorHexes,
+    this.unreadBadgeColorHex = '#E53935',
   });
 
   final String accentColorHex;
   final List<String> outgoingBubbleColorHexes;
   final String incomingBubbleColorHex;
   final List<String> wallpaperColorHexes;
+  final String unreadBadgeColorHex;
 
   factory ChatCustomTheme.fromJson(Map<String, dynamic>? json) {
     final outgoing = _normalizeColorHexList(
@@ -268,6 +312,10 @@ class ChatCustomTheme {
         fallback: defaults.incomingBubbleColorHex,
       ),
       wallpaperColorHexes: wallpaper,
+      unreadBadgeColorHex: _normalizeColorHex(
+        json?['unreadBadgeColorHex'],
+        fallback: defaults.unreadBadgeColorHex,
+      ),
     );
   }
 
@@ -276,6 +324,7 @@ class ChatCustomTheme {
     List<String>? outgoingBubbleColorHexes,
     String? incomingBubbleColorHex,
     List<String>? wallpaperColorHexes,
+    String? unreadBadgeColorHex,
   }) {
     return ChatCustomTheme(
       accentColorHex: _normalizeColorHex(
@@ -297,6 +346,10 @@ class ChatCustomTheme {
         minLength: 2,
         maxLength: 4,
       ),
+      unreadBadgeColorHex: _normalizeColorHex(
+        unreadBadgeColorHex,
+        fallback: this.unreadBadgeColorHex,
+      ),
     );
   }
 
@@ -305,6 +358,7 @@ class ChatCustomTheme {
     'outgoingBubbleColorHexes': outgoingBubbleColorHexes,
     'incomingBubbleColorHex': incomingBubbleColorHex,
     'wallpaperColorHexes': wallpaperColorHexes,
+    'unreadBadgeColorHex': unreadBadgeColorHex,
   };
 }
 

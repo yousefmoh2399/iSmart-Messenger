@@ -6,6 +6,7 @@ import 'package:iconsax/iconsax.dart';
 
 import '../../../app/desktop_workspace_shell.dart';
 import '../../../core/config/app_config.dart';
+import '../../../core/network/api_exception.dart';
 import '../../../shared/providers/providers.dart';
 import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../../shared/widgets/button_loading_indicator.dart';
@@ -103,12 +104,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   String _friendlyLoginError(Object error) {
+    if (error is ApiException) {
+      return error.message;
+    }
+
     final raw = error.toString();
     final text = raw.toLowerCase();
 
     if (text.contains('invalid') &&
         (text.contains('password') || text.contains('credentials'))) {
-      return 'اسم المستخدم أو كلمة المرور غير صحيحة.';
+      return 'كلمة المرور غير صحيحة.';
+    }
+    if (text.contains('invalid') && text.contains('username')) {
+      return 'اسم المستخدم غير مسجل.';
     }
     if (text.contains('disabled') ||
         text.contains('blocked') ||
@@ -127,7 +135,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         text.contains('attempt')) {
       return 'تم تجاوز عدد محاولات تسجيل الدخول. حاول مرة أخرى بعد قليل.';
     }
-    if (text.contains('500') || text.contains('server')) {
+    if (text.contains('500') || text.contains('server error') || text.contains('internal server')) {
       return 'الخادم يواجه مشكلة مؤقتة. حاول مرة أخرى بعد قليل.';
     }
     if (text.contains('socket') ||
@@ -136,10 +144,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         text.contains('timeout')) {
       return 'تعذر الاتصال بالخادم. تحقق من عنوان الخادم واتصال الشبكة ثم أعد المحاولة.';
     }
-    if (text.contains('host') ||
-        text.contains('dns') ||
-        text.contains('api') ||
-        text.contains('failed host lookup')) {
+    if (text.contains('failed host lookup') ||
+        text.contains('connection refused') ||
+        text.contains('network is unreachable')) {
       return 'عنوان الخادم غير صحيح أو الخادم غير متاح حاليًا. عدّل الإعدادات ثم أعد المحاولة.';
     }
     return raw.trim().isEmpty ? 'فشل تسجيل الدخول. حاول مرة أخرى.' : raw;
@@ -274,30 +281,34 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     if (result == null || !mounted) return;
 
+    final apiBaseUrlCtrl = ref.read(apiBaseUrlControllerProvider.notifier);
+    final publicSettingsService = ref.read(publicAppSettingsServiceProvider);
+    final authRepository = ref.read(authRepositoryProvider);
+    final serverConnCtrl = ref.read(
+      serverConnectionControllerProvider.notifier,
+    );
+
     if (result == '__reset__') {
-      await ref.read(apiBaseUrlControllerProvider.notifier).reset();
+      await apiBaseUrlCtrl.reset();
       try {
-        final defaults = await ref
-            .read(publicAppSettingsServiceProvider)
-            .fetchDefaults();
+        final defaults = await publicSettingsService.fetchDefaults();
         final desktopBaseUrl = defaults.desktopBaseUrl?.trim();
         if (desktopBaseUrl != null && desktopBaseUrl.isNotEmpty) {
-          await ref
-              .read(apiBaseUrlControllerProvider.notifier)
-              .applyAdminDefault(desktopBaseUrl);
+          await apiBaseUrlCtrl.applyAdminDefault(desktopBaseUrl);
         }
       } catch (_) {}
     } else if (result.isNotEmpty) {
-      await ref.read(apiBaseUrlControllerProvider.notifier).save(result);
+      await apiBaseUrlCtrl.save(result);
     }
 
-    await ref.read(authRepositoryProvider).clearLocalSessionForServerChange();
+    await authRepository.clearLocalSessionForServerChange();
+    if (!mounted) return;
     ref.read(serverRecoveryRevisionProvider.notifier).state++;
     ref.invalidate(authControllerProvider);
     ref.invalidate(documentsControllerProvider);
     ref.invalidate(adminDocumentsControllerProvider);
     ref.invalidate(usersControllerProvider);
-    await ref.read(serverConnectionControllerProvider.notifier).refresh();
+    await serverConnCtrl.refresh();
 
     if (!mounted) return;
     setState(() => _errorMessage = null);
@@ -381,8 +392,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(28),
           color: isDark
-              ? const Color(0xFF1F2C38).withValues(alpha: 0.65)
-              : Colors.white.withValues(alpha: 0.8),
+              ? const Color(0xFF1E2834)
+              : Colors.white,
           border: Border.all(
             color: isDark
                 ? const Color(0xFF314555).withValues(alpha: 0.45)
@@ -398,11 +409,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(28),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-            child: Padding(
-              padding: EdgeInsets.all(compact ? 22 : 28),
-              child: Form(
+          child: Padding(
+            padding: EdgeInsets.all(compact ? 22 : 28),
+            child: Form(
                 key: _formKey,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -545,8 +554,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 
   @override

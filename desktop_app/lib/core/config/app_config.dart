@@ -1,4 +1,5 @@
 class AppConfig {
+  static const fallbackAppVersion = '1.1.24';
   static const legacyHostedApiBaseUrl = 'http://172.17.100.253:5000';
   static const defaultDirectIpPort = int.fromEnvironment(
     'API_DEFAULT_PORT',

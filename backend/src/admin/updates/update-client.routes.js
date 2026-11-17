@@ -1,7 +1,7 @@
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 const { body, param, query } = require("express-validator");
-const { requireAuth } = require("../../middleware/auth.middleware");
+const { requireAuth, optionalAuth } = require("../../middleware/auth.middleware");
 const validateRequest = require("../../middleware/validate.middleware");
 const { createRateLimitStore } = require("../../config/rate-limit-store");
 const {
@@ -53,6 +53,7 @@ const updateProgressLimiter = rateLimit({
 
 router.get(
   "/releases/:id/download",
+  optionalAuth,
   [param("id").isMongoId().withMessage("معرّف الإصدار غير صالح.")],
   validateRequest,
   downloadReleaseArtifact,
@@ -73,7 +74,16 @@ router.post(
     body("hostName").optional().isString(),
     body("branchCode").optional().isString(),
     body("channel").optional().isString(),
-    body("platform").optional().isIn(["desktop_windows", "mobile_android"]),
+    body("platform")
+      .optional()
+      .isIn([
+        "desktop_windows",
+        "mobile_android",
+        "desktop",
+        "windows",
+        "desktop_electron",
+        "electron",
+      ]),
     body("appVersion").optional().isString(),
     body("osName").optional().isString(),
     body("osVersion").optional().isString(),

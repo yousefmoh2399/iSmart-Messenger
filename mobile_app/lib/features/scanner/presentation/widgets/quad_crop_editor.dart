@@ -31,6 +31,7 @@ class _QuadCropEditorState extends State<QuadCropEditor> {
   late List<double> _corners;
   int? _activeCornerIndex; // 0: TL, 1: TR, 2: BR, 3: BL
   Offset? _magnifierPos;
+  Offset _touchOffset = Offset.zero; // Offset between touch point and corner center
 
   @override
   void initState() {
@@ -92,14 +93,15 @@ class _QuadCropEditorState extends State<QuadCropEditor> {
     );
   }
 
-  void _handlePanStart(Offset globalPos, Rect imageRect) {
-    const hitRadius = 42.0;
+  void _handlePanStart(Offset localPos, Rect imageRect) {
+    // Use a generous hit radius (56dp) so corners are easy to grab with thumbs
+    const hitRadius = 56.0;
     int? nearestIndex;
     double minDistance = double.infinity;
 
     for (int i = 0; i < 4; i++) {
       final screenPos = _getCornerScreenPos(i, imageRect);
-      final dist = (globalPos - screenPos).distance;
+      final dist = (localPos - screenPos).distance;
       if (dist < hitRadius && dist < minDistance) {
         minDistance = dist;
         nearestIndex = i;
@@ -107,24 +109,31 @@ class _QuadCropEditorState extends State<QuadCropEditor> {
     }
 
     if (nearestIndex != null) {
+      // Compute offset between touch point and corner so the corner follows
+      // finger movement relative to initial touch, not snapping to finger center
+      final cornerPos = _getCornerScreenPos(nearestIndex, imageRect);
+      _touchOffset = cornerPos - localPos;
       setState(() {
         _activeCornerIndex = nearestIndex;
-        _magnifierPos = globalPos;
+        _magnifierPos = cornerPos;
       });
     }
   }
 
-  void _handlePanUpdate(Offset globalPos, Rect imageRect) {
+  void _handlePanUpdate(Offset localPos, Rect imageRect) {
     final active = _activeCornerIndex;
     if (active == null) return;
 
-    final normX = ((globalPos.dx - imageRect.left) / imageRect.width).clamp(0.0, 1.0);
-    final normY = ((globalPos.dy - imageRect.top) / imageRect.height).clamp(0.0, 1.0);
+    // Apply the stored touch offset so the corner stays at the exact position
+    // relative to where the user first touched, not jumping to finger center
+    final adjustedPos = localPos + _touchOffset;
+    final normX = ((adjustedPos.dx - imageRect.left) / imageRect.width).clamp(0.0, 1.0);
+    final normY = ((adjustedPos.dy - imageRect.top) / imageRect.height).clamp(0.0, 1.0);
 
     setState(() {
       _corners[active * 2] = normX;
       _corners[active * 2 + 1] = normY;
-      _magnifierPos = globalPos;
+      _magnifierPos = adjustedPos;
     });
     widget.onCornersChanged(_corners);
   }
@@ -134,6 +143,7 @@ class _QuadCropEditorState extends State<QuadCropEditor> {
       setState(() {
         _activeCornerIndex = null;
         _magnifierPos = null;
+        _touchOffset = Offset.zero;
       });
     }
   }
@@ -320,23 +330,23 @@ class _QuadMeshPainter extends CustomPainter {
       canvas.drawLine(vStart, vEnd, gridPaint);
     }
 
-    // 5. Draw 4 corner handles
+    // 5. Draw 4 corner handles (larger for easy grabbing)
     final pts = [p0, p1, p2, p3];
     for (int i = 0; i < 4; i++) {
       final pt = pts[i];
       final isActive = (i == activeCornerIndex);
-      final radius = isActive ? 16.0 : 12.0;
+      final radius = isActive ? 18.0 : 14.0;
 
       // Outer glow / shadow
       final shadowPaint = Paint()
         ..color = Colors.black38
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-      canvas.drawCircle(pt, radius + 2, shadowPaint);
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+      canvas.drawCircle(pt, radius + 3, shadowPaint);
 
       // White ring
       final ringPaint = Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.5
+        ..strokeWidth = isActive ? 4.5 : 3.5
         ..color = Colors.white;
       canvas.drawCircle(pt, radius, ringPaint);
 
@@ -344,7 +354,7 @@ class _QuadMeshPainter extends CustomPainter {
       final dotPaint = Paint()
         ..style = PaintingStyle.fill
         ..color = isActive ? Colors.white : const Color(0xFF00E676);
-      canvas.drawCircle(pt, radius - 2.5, dotPaint);
+      canvas.drawCircle(pt, radius - 3.0, dotPaint);
     }
   }
 

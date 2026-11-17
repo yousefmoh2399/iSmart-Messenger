@@ -1,4 +1,9 @@
 const asyncHandler = require("../utils/async-handler");
+const { exportUsersReport } = require("../services/user-export.service");
+const {
+  batchGenerateBranchUsers,
+  DEFAULT_JOB_TEMPLATES,
+} = require("../services/user-batch-generator.service");
 const { sendChatResponse } = require("../chat/utils/chat-response");
 const { sendUploadFile } = require("../utils/send-upload-file");
 const {
@@ -16,6 +21,27 @@ const {
   registerCurrentPushDevice,
   unregisterCurrentPushDevice,
 } = require("../services/user.service");
+
+
+const exportUsersHandler = asyncHandler(async (req, res) => {
+  const { buffer, fileName, contentType } = await exportUsersReport(req.user, {
+    format: req.query.format === "pdf" ? "pdf" : "xlsx",
+    branchId: req.query.branchId || null,
+    departmentId: req.query.departmentId || null,
+    role: req.query.role || null,
+    status: req.query.status || null,
+    search: req.query.search || null,
+  });
+
+  res.set({
+    "Content-Type": contentType,
+    "Content-Disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
+    "Content-Length": buffer.length,
+    "Access-Control-Expose-Headers": "Content-Disposition",
+  });
+
+  res.status(200).send(buffer);
+});
 
 const getUsers = asyncHandler(async (req, res) => {
   const { users, pagination } = await listUsers(req.user, req.query);
@@ -37,6 +63,26 @@ const createManagedUser = asyncHandler(async (req, res) => {
     }
   }
   sendChatResponse(res, { status: 201, data: { user }, legacy: { user } });
+});
+
+const batchGenerateBranchUsersHandler = asyncHandler(async (req, res) => {
+  const result = await batchGenerateBranchUsers(req.user, req.body);
+  const io = req.app.get("io");
+  if (io) {
+    io.emit("users_updated", {});
+  }
+  sendChatResponse(res, {
+    status: 201,
+    data: result,
+    legacy: result,
+  });
+});
+
+const getBatchJobTemplatesHandler = asyncHandler(async (req, res) => {
+  sendChatResponse(res, {
+    data: { templates: DEFAULT_JOB_TEMPLATES },
+    legacy: { templates: DEFAULT_JOB_TEMPLATES },
+  });
 });
 
 const updateManagedUser = asyncHandler(async (req, res) => {
@@ -81,8 +127,6 @@ const resetManagedUserPassword = asyncHandler(async (req, res) => {
   );
   const io = req.app.get("io");
   if (io) {
-    io.emit("users_updated", {});
-    io.emit("user_profile_updated", { user });
     io.to(`user:${req.params.id}`).emit("force_logout", {
       reason: "password_reset",
     });
@@ -96,17 +140,32 @@ const getMyProfile = asyncHandler(async (req, res) => {
 });
 
 const updateMyProfile = asyncHandler(async (req, res) => {
-  const user = await updateProfile(req.user, req.body);
+  const result = await updateProfile(req.user, {
+    ...req.body,
+    deviceUid: req.body?.deviceUid || req.user.deviceUid,
+  });
+  const user = result.user || result;
   const io = req.app.get("io");
   if (io) {
-    io.emit("user_profile_updated", { user });
+    const publicProfileChanged =
+      req.body?.fullName != null || req.body?.jobTitle !== undefined;
+    if (publicProfileChanged) {
+      io.emit("user_profile_updated", { user });
+    } else {
+      io.to(`user:${req.user.id}`).emit("user_profile_updated", { user });
+    }
     if (req.body?.password) {
+      const currentDeviceUid = req.body?.deviceUid || req.user.deviceUid || null;
       io.to(`user:${req.user.id}`).emit("force_logout", {
         reason: "password_changed",
+        excludeDeviceUid: currentDeviceUid,
       });
     }
   }
-  sendChatResponse(res, { data: { user }, legacy: { user } });
+  sendChatResponse(res, {
+    data: result.token ? result : { user },
+    legacy: result.token ? result : { user },
+  });
 });
 
 const uploadMyAvatar = asyncHandler(async (req, res) => {
@@ -136,8 +195,11 @@ const unregisterMyPushDevice = asyncHandler(async (req, res) => {
 
 const downloadAvatar = asyncHandler(async (req, res) => {
   const filePath = await getAvatarFilePath(req.params.id);
+  const hasVersionBuster = String(req.query?.v || "").trim().length > 0;
   await sendUploadFile(res, filePath, {
-    cacheControl: "private, max-age=300",
+    cacheControl: hasVersionBuster
+      ? "private, max-age=604800, immutable"
+      : "private, max-age=1800",
     disposition: "inline",
     notFoundMessage: "Avatar not found.",
     logLabel: "avatar-download",
@@ -166,8 +228,11 @@ const deleteUserHandler = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  exportUsersHandler,
   getUsers,
   createManagedUser,
+  batchGenerateBranchUsersHandler,
+  getBatchJobTemplatesHandler,
   updateManagedUser,
   updateManagedUserStatus,
   resetManagedUserPassword,

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/chat_models.dart';
 import '../../providers/chat_folders_provider.dart';
+import 'create_chat_folder_dialog.dart';
 
 class ChatFolderInlineItem extends ConsumerWidget {
   final ChatFolder folder;
@@ -22,20 +23,8 @@ class ChatFolderInlineItem extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
 
-    // Pick 10 random colors using the folder ID's hash
-    final colors = [
-      Colors.redAccent,
-      Colors.blueAccent,
-      Colors.green,
-      Colors.orange,
-      Colors.purpleAccent,
-      Colors.teal,
-      Colors.pink,
-      Colors.indigo,
-      Colors.cyan,
-      Colors.amber,
-    ];
-    final color = colors[folder.id.hashCode.abs() % colors.length];
+    final color = resolveFolderColor(folder);
+    final iconData = resolveFolderIcon(folder);
 
     int unreadCount = 0;
     for (final c in conversations) {
@@ -64,13 +53,13 @@ class ChatFolderInlineItem extends ConsumerWidget {
               ? theme.colorScheme.primaryContainer.withValues(alpha: 0.3)
               : Colors.transparent,
           leading: Container(
-            width: 48,
-            height: 48,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(16),
+              color: color.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(14),
             ),
-            child: Icon(Icons.folder_rounded, color: color),
+            child: Icon(iconData, color: color, size: 22),
           ),
           title: Text(
             folder.name,
@@ -103,10 +92,23 @@ class ChatFolderInlineItem extends ConsumerWidget {
                 icon: const Icon(Icons.more_vert_rounded),
                 itemBuilder: (context) => [
                   const PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit_note_rounded, size: 18),
+                        SizedBox(width: 8),
+                        Text('تعديل المجلد'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
                     value: 'delete',
-                    child: Text(
-                      'حذف المجلد',
-                      style: TextStyle(color: Colors.red),
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_outline_rounded, color: Colors.red, size: 18),
+                        SizedBox(width: 8),
+                        Text('حذف المجلد', style: TextStyle(color: Colors.red)),
+                      ],
                     ),
                   ),
                 ],
@@ -115,6 +117,13 @@ class ChatFolderInlineItem extends ConsumerWidget {
                     ref
                         .read(chatFoldersProvider.notifier)
                         .deleteFolder(folder.id);
+                  } else if (val == 'edit') {
+                    showCreateOrEditChatFolderDialog(
+                      context,
+                      existingFolder: folder,
+                      availableConversations: conversations,
+                      currentUserId: currentUserId,
+                    );
                   }
                 },
               ),

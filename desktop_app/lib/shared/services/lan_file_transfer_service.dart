@@ -218,7 +218,7 @@ class LanFileTransferService {
       }
     }
 
-    const batchSize = 128;
+    const batchSize = 24;
     final discovered = <String, LanDiscoveredPeer>{};
     for (var index = 0; index < candidates.length; index += batchSize) {
       final batch = candidates.skip(index).take(batchSize).toList();
@@ -740,6 +740,15 @@ class LanFileTransferService {
     response.headers.set(HttpHeaders.accessControlMaxAgeHeader, '86400');
   }
 
+  static final RegExp _virtualInterfacePattern = RegExp(
+    r'(vmware|virtualbox|vbox|vethernet|hyper-v|wsl|loopback|npcap|pcap|tap|tun|tailscale|zerotier|hamachi|wireguard|nordlynx|anyconnect|fortinet|pulse|cisco|vpn|bluetooth)',
+    caseSensitive: false,
+  );
+
+  @visibleForTesting
+  static bool isVirtualInterfaceName(String name) =>
+      _virtualInterfacePattern.hasMatch(name);
+
   Future<List<String>> _resolveLocalIpv4s() async {
     final interfaces = await NetworkInterface.list(
       includeLoopback: false,
@@ -747,6 +756,9 @@ class LanFileTransferService {
     );
     final addresses = <String>{};
     for (final iface in interfaces) {
+      if (isVirtualInterfaceName(iface.name)) {
+        continue;
+      }
       for (final address in iface.addresses) {
         if (address.type != InternetAddressType.IPv4) {
           continue;
@@ -755,7 +767,10 @@ class LanFileTransferService {
           continue;
         }
         final value = address.address.trim();
-        if (value.isEmpty) {
+        if (value.isEmpty ||
+            value.startsWith('127.') ||
+            value.startsWith('169.254.') ||
+            value == '0.0.0.0') {
           continue;
         }
         addresses.add(value);

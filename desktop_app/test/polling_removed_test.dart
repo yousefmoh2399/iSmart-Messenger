@@ -27,6 +27,11 @@ void main() {
             source.contains('_titleAttentionTimer')) {
           continue;
         }
+        // Outbox queue periodic drain timer flushes pending offline messages
+        if (path.endsWith('features/chat/data/chat_outbox_service.dart') &&
+            source.contains('_drainTimer = Timer.periodic')) {
+          continue;
+        }
         // The printer monitoring screen intentionally refreshes the status of
         // an active print job while that screen is open. This is scoped UI
         // status refresh, not the removed app-wide background polling.
@@ -34,6 +39,19 @@ void main() {
               'features/printers/presentation/printer_monitoring_screen.dart',
             ) &&
             source.contains("_timer = Timer.periodic")) {
+          continue;
+        }
+        // Scheduled messages list widget displays a countdown timer for UI refresh
+        if (path.endsWith(
+              'features/chat/presentation/widgets/scheduled_messages_list.dart',
+            ) &&
+            source.contains('_countdownTimer = Timer.periodic')) {
+          continue;
+        }
+        // Admin topology monitoring screens refresh live graph while open
+        if (path.contains('features/admin/presentation/') &&
+            (path.endsWith('live_operations_topology_screen.dart') ||
+             path.endsWith('update_distribution_topology_screen.dart'))) {
           continue;
         }
         offenders.add(path);

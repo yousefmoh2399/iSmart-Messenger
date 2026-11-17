@@ -21,12 +21,18 @@ class HomeScreen extends ConsumerWidget {
     final authState = ref.watch(authControllerProvider);
     final draftState = ref.watch(scanSessionControllerProvider);
     final announcementsState = ref.watch(announcementsControllerProvider);
+    final remoteDocsState = ref.watch(remoteDocumentsControllerProvider);
+    final localDocsState = ref.watch(pendingUploadsControllerProvider);
     final themeMode =
         ref.watch(themeModeControllerProvider).valueOrNull ?? ThemeMode.light;
     final syncBanner = ref.watch(syncBannerStateProvider);
 
     final user = authState.valueOrNull;
-    final hasDraft = (draftState.valueOrNull?.pages.length ?? 0) > 0;
+    final draftPagesCount = draftState.valueOrNull?.pages.length ?? 0;
+    final hasDraft = draftPagesCount > 0;
+    final cloudFilesCount = remoteDocsState.valueOrNull?.length ?? 0;
+    final localFilesCount = localDocsState.valueOrNull?.length ?? 0;
+
     final isAdmin = user?.isAdmin == true;
     final canManageChat = user?.canManageChat == true;
     final canViewPrinters = user?.canViewPrinterModule == true;
@@ -37,18 +43,44 @@ class HomeScreen extends ConsumerWidget {
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final palette = context.appThemePalette;
+    final scaffoldBg = isDark
+        ? const Color(0xFF000000)
+        : const Color(0xFFF2F2F7);
+    final cardBg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+    final borderCol = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.black.withValues(alpha: 0.05);
 
     final printersColor = isDark
-        ? const Color(0xFF0F766E)
+        ? const Color(0xFF14B8A6)
         : const Color(0xFF0D9488);
     final ticketsColor = isDark
-        ? const Color(0xFF5B21B6)
+        ? const Color(0xFF8B5CF6)
         : const Color(0xFF6D28D9);
 
+    final avatarLetter = user?.fullName.trim().isNotEmpty == true
+        ? user!.fullName.trim()[0].toUpperCase()
+        : (user?.username.trim().isNotEmpty == true
+              ? user!.username.trim()[0].toUpperCase()
+              : 'U');
+
     return Scaffold(
+      backgroundColor: scaffoldBg,
       appBar: AppBar(
-        title: const Text('اسكان الملفات'),
+        title: const Text(
+          'مركز المستندات والعمليات',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
         actions: [
+          IconButton(
+            tooltip: 'تحديث البيانات',
+            onPressed: () {
+              ref.read(remoteDocumentsControllerProvider.notifier).refresh();
+              ref.read(pendingUploadsControllerProvider.notifier).refresh();
+              ref.read(announcementsControllerProvider.notifier).refresh();
+            },
+            icon: const Icon(Icons.refresh_rounded),
+          ),
           IconButton(
             tooltip: 'تبديل الثيم',
             onPressed: () =>
@@ -61,242 +93,342 @@ class HomeScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final compactCards = constraints.maxWidth < 400;
-
-          // Resolve first letter of the user name for avatar
-          final avatarLetter = user?.fullName.trim().isNotEmpty == true
-              ? user!.fullName.trim()[0].toUpperCase()
-              : (user?.username.trim().isNotEmpty == true
-                    ? user!.username.trim()[0].toUpperCase()
-                    : 'U');
-
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-            children: [
-              // 1. Profile Welcome Header Card
-              Row(
-                children: [
-                  Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: isDark
-                          ? const Color(0xFF2C2C2E)
-                          : const Color(0xFFF2F2F7),
-                    ),
-                    child: Center(
-                      child: Text(
-                        avatarLetter,
-                        style: TextStyle(
-                          color: palette.accent,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 22,
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 36),
+        children: [
+          // 1. Apple iOS Bento Profile & Live Counters Header
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: cardBg,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: borderCol),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            palette.accent,
+                            palette.accent.withValues(alpha: 0.72),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Center(
+                        child: Text(
+                          avatarLetter,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 22,
+                          ),
                         ),
                       ),
                     ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'مرحباً، ${user?.fullName ?? user?.username ?? 'مستخدم النظام'}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 18,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 9,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: palette.accent.withValues(alpha: 0.13),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  isAdmin ? 'مسؤول النظام (Admin)' : 'حساب موظف',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: palette.accent,
+                                  ),
+                                ),
+                              ),
+                              if ((user?.branchCode ?? '').isNotEmpty)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: isDark
+                                        ? Colors.white.withValues(alpha: 0.07)
+                                        : const Color(0xFFF2F2F7),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    'فرع ${user!.branchCode}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: isDark
+                                          ? Colors.white70
+                                          : Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _BentoQuickStat(
+                        label: 'الملفات السحابية',
+                        value: '$cloudFilesCount',
+                        icon: Icons.cloud_done_rounded,
+                        color: const Color(0xFF007AFF),
+                        isDark: isDark,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _BentoQuickStat(
+                        label: 'الملفات المحلية',
+                        value: '$localFilesCount',
+                        icon: Icons.folder_special_rounded,
+                        color: const Color(0xFFF59E0B),
+                        isDark: isDark,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _BentoQuickStat(
+                        label: 'صفحات المسودة',
+                        value: '$draftPagesCount',
+                        icon: Icons.document_scanner_rounded,
+                        color: const Color(0xFF10B981),
+                        isDark: isDark,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // 2. Sync Offline / Progress Banner
+          if (syncBanner.isOffline || syncBanner.isSyncing) ...[
+            _SyncStatusBanner(state: syncBanner),
+            const SizedBox(height: 12),
+          ],
+
+          // 3. System Announcements Strip
+          _AnnouncementsStrip(announcementsState: announcementsState),
+
+          // 4. Saved Draft Notice Banner
+          if (hasDraft) ...[
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: const Color(0xFFF59E0B).withValues(alpha: 0.35),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF59E0B).withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.restore_page_rounded,
+                      color: Color(0xFFD97706),
+                      size: 24,
+                    ),
                   ),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'مرحباً، ${user?.fullName ?? user?.username ?? 'أيها المستخدم'}',
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 24,
-                              ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        const Text(
+                          'مسودة مسح محفوظة غير مكتملة',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFFB45309),
+                            fontSize: 14,
+                          ),
                         ),
+                        const SizedBox(height: 2),
                         Text(
-                          isAdmin ? 'مسؤول النظام (Admin)' : 'حساب موظف',
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
+                          'تحتوي على $draftPagesCount صفحات جاهزة للاستكمال والحفظ.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: const Color(
+                              0xFFB45309,
+                            ).withValues(alpha: 0.9),
+                          ),
                         ),
                       ],
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 14),
-
-              // 2. Sync Offline Banners
-              if (syncBanner.isOffline || syncBanner.isSyncing) ...[
-                _SyncStatusBanner(state: syncBanner),
-                const SizedBox(height: 12),
-              ],
-
-              // 3. System Announcements Strip
-              _AnnouncementsStrip(announcementsState: announcementsState),
-
-              // 4. Saved Draft Notice Banner
-              if (hasDraft && !isAdmin) ...[
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.amber.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(
-                      color: Colors.amber.withValues(alpha: 0.3),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.withValues(alpha: 0.15),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.restore_page_rounded,
-                          color: Color(0xFFD97706),
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'مسودة محفوظة غير مكتملة',
-                              style: Theme.of(context).textTheme.titleMedium
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                    color: const Color(0xFFB45309),
-                                    fontSize: 14,
-                                  ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'تحتوي على ${draftState.valueOrNull!.pages.length} صفحات تنتظر الحفظ.',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: const Color(
-                                  0xFFB45309,
-                                ).withValues(alpha: 0.9),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      FilledButton(
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => const ScannerSessionScreen(),
-                            ),
-                          );
-                        },
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFFD97706),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          minimumSize: const Size(0, 38),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text(
-                          'استكمال',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-
-              // 5. Quick Actions Heading
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                child: Text(
-                  'الإجراءات السريعة',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 20,
-                  ),
-                ),
-              ),
-
-              // 6. Hero Scanning Card (For Staff Only)
-              if (!isAdmin) ...[
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () {
+                  const SizedBox(width: 10),
+                  FilledButton(
+                    onPressed: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (_) => const ScannerSessionScreen(),
                         ),
                       );
                     },
-                    borderRadius: BorderRadius.circular(16),
-                    child: Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: palette.accent.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: palette.accent.withValues(alpha: 0.2),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFD97706),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      minimumSize: const Size(0, 38),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'استكمال',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // 5. Section Header: الماسح الضوئي والمستندات
+          Padding(
+            padding: const EdgeInsets.only(top: 6, bottom: 10, right: 4),
+            child: Text(
+              'الماسح الضوئي والمستندات',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w900,
+                fontSize: 17,
+              ),
+            ),
+          ),
+
+          // 6. Hero Gradient Card: مسح مستند جديد (Visible for ALL users)
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const ScannerSessionScreen(),
+                  ),
+                );
+              },
+              borderRadius: BorderRadius.circular(22),
+              child: Ink(
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF007AFF), Color(0xFF2563EB)],
+                    begin: Alignment.topRight,
+                    end: Alignment.bottomLeft,
+                  ),
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 58,
+                        height: 58,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: const Icon(
+                          Icons.document_scanner_rounded,
+                          color: Colors.white,
+                          size: 32,
                         ),
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Row(
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Container(
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: palette.accent,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(
-                                Icons.document_scanner_rounded,
+                            const Text(
+                              'مسح مستند جديد بالكاميرا',
+                              style: TextStyle(
                                 color: Colors.white,
-                                size: 32,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 17.5,
                               ),
                             ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                            const SizedBox(height: 4),
+                            Text(
+                              'التقط الصفحات مع قص تلقائي للحواف وتحويل فوري إلى PDF عالي الدقة.',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.88),
+                                fontSize: 12.5,
+                                height: 1.35,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Text(
-                                    'مسح مستند جديد',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium
-                                        ?.copyWith(
-                                          color: palette.accent,
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 18,
-                                        ),
+                                  Icon(
+                                    Icons.camera_alt_rounded,
+                                    size: 15,
+                                    color: Color(0xFF007AFF),
                                   ),
-                                  const SizedBox(height: 4),
+                                  SizedBox(width: 6),
                                   Text(
-                                    'التقط الصفحات وأنشئ ملفات PDF احترافية ونظيفة بسرعة.',
+                                    'ابدأ المسح الضوئي الآن',
                                     style: TextStyle(
-                                      color: palette.accent.withValues(
-                                        alpha: 0.8,
-                                      ),
+                                      color: Color(0xFF007AFF),
+                                      fontWeight: FontWeight.w800,
                                       fontSize: 12,
-                                      height: 1.3,
                                     ),
                                   ),
                                 ],
@@ -305,117 +437,334 @@ class HomeScreen extends ConsumerWidget {
                           ],
                         ),
                       ),
-                    ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 14),
-              ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
 
-              // 7. Grid of Secondary Actions
-              Container(
-                clipBehavior: Clip.antiAlias,
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-                  borderRadius: BorderRadius.circular(12),
+          // 7. 2-Column Bento Grid: ملفاتي السحابية + ملفاتي المحلية
+          Row(
+            children: [
+              Expanded(
+                child: _BentoFeatureCard(
+                  title: 'ملفاتي السحابية',
+                  subtitle: 'المرفوعة والمشتركة والمجلدات',
+                  badgeText: '$cloudFilesCount ملف',
+                  icon: Icons.cloud_done_rounded,
+                  accentColor: const Color(0xFF007AFF),
+                  cardBg: cardBg,
+                  borderCol: borderCol,
+                  isDark: isDark,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const MyFilesScreen()),
+                    );
+                  },
                 ),
-                child: Column(
-                  children: [
-                    _ActionListTile(
-                      title: 'ملفاتي السحابية',
-                      subtitle: isAdmin
-                          ? 'إدارة ومراجعة ملفات النظام بالكامل'
-                          : 'استعرض ملفاتك المرفوعة والمشتركة',
-                      icon: Icons.cloud_done_rounded,
-                      iconColor: palette.accent,
-                      showTopDivider: false,
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const MyFilesScreen(),
-                          ),
-                        );
-                      },
-                    ),
-                    if (!isAdmin)
-                      _ActionListTile(
-                        title: 'ملفاتي المحلية',
-                        subtitle: 'الملفات الممسوحة والمحفوظة على الموبايل',
-                        icon: Icons.folder_copy_rounded,
-                        iconColor: palette.warning,
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => const PendingUploadsScreen(),
-                            ),
-                          );
-                        },
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _BentoFeatureCard(
+                  title: 'ملفاتي المحلية',
+                  subtitle: 'الممسوحة والمحفوظة بالهاتف',
+                  badgeText: '$localFilesCount ملف',
+                  icon: Icons.folder_special_rounded,
+                  accentColor: const Color(0xFFF59E0B),
+                  cardBg: cardBg,
+                  borderCol: borderCol,
+                  isDark: isDark,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const PendingUploadsScreen(),
                       ),
-                    if (canManageChat)
-                      _ActionListTile(
-                        title: 'إدارة الشات',
-                        subtitle: 'تحكم في المستخدمين والغرف والغرف النشطة',
-                        icon: Icons.admin_panel_settings_rounded,
-                        iconColor: palette.success,
-                        showTopDivider: isAdmin,
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => const ChatAdminManagementScreen(),
-                            ),
-                          );
-                        },
-                      ),
-                    if (canViewPrinters)
-                      _ActionListTile(
-                        title: 'مراقبة الطابعات',
-                        subtitle: 'متابعة الفروع وحساب استهلاك الورق',
-                        icon: Icons.print_rounded,
-                        iconColor: printersColor,
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  const MobilePrinterMonitoringScreen(),
-                            ),
-                          );
-                        },
-                      ),
-                    if (canViewItAssets)
-                      _ActionListTile(
-                        title: 'ماسح أصول IT',
-                        subtitle: user?.canManageItInventory == true
-                            ? 'مسح QR لعرض الأجهزة أو تسجيل الجرد الفعلي'
-                            : 'مسح QR وعرض بيانات الجهاز وسجل حركته',
-                        icon: Icons.qr_code_scanner_rounded,
-                        iconColor: const Color(0xFF2563EB),
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  const MobileItAssetScannerScreen(),
-                            ),
-                          );
-                        },
-                      ),
-                    _ActionListTile(
-                      title: 'تذاكر الدعم',
-                      subtitle: 'تابع طلباتك وحالة التذاكر المفتوحة',
-                      icon: Icons.confirmation_number_rounded,
-                      iconColor: ticketsColor,
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const TicketsScreen(),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
+                    );
+                  },
                 ),
               ),
             ],
-          );
-        },
+          ),
+          const SizedBox(height: 12),
+
+          // 8. Quick Action Card: إرسال ملف مباشرة للكمبيوتر
+          Container(
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: cardBg,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: borderCol),
+            ),
+            child: _ActionListTile(
+              title: 'إرسال ملف مباشر للكمبيوتر أو الطابعة',
+              subtitle:
+                  'اختر ملفاً من جهازك لإرساله فوراً لسطح المكتب أو طباعته عن بعد',
+              icon: Icons.desktop_windows_rounded,
+              iconColor: const Color(0xFF0EA5E9),
+              showTopDivider: false,
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const MyFilesScreen(
+                      launchDesktopSendPickerOnOpen: true,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // 9. Section Header: العمليات والإدارة
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10, right: 4),
+            child: Text(
+              'العمليات والإدارة',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w900,
+                fontSize: 17,
+              ),
+            ),
+          ),
+
+          // 10. Bento Group for Operations & Admin
+          Container(
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: cardBg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: borderCol),
+            ),
+            child: Column(
+              children: [
+                if (canManageChat)
+                  _ActionListTile(
+                    title: 'إدارة الشات والغرف والمجموعات',
+                    subtitle:
+                        'التحكم في الموظفين، الأقسام، المجموعات، وقنوات البث',
+                    icon: Icons.admin_panel_settings_rounded,
+                    iconColor: palette.success,
+                    showTopDivider: false,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const ChatAdminManagementScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                if (canViewPrinters)
+                  _ActionListTile(
+                    title: 'مراقبة الطابعات والأحبار',
+                    subtitle: 'متابعة حالة الطابعات بالفروع واستهلاك الورق',
+                    icon: Icons.print_rounded,
+                    iconColor: printersColor,
+                    showTopDivider: canManageChat,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const MobilePrinterMonitoringScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                if (canViewItAssets)
+                  _ActionListTile(
+                    title: 'ماسح أصول ومخزون IT',
+                    subtitle: user?.canManageItInventory == true
+                        ? 'مسح QR لعرض الأجهزة أو تسجيل الجرد الفعلي'
+                        : 'مسح QR وعرض بيانات الجهاز وسجل حركته',
+                    icon: Icons.qr_code_scanner_rounded,
+                    iconColor: const Color(0xFF2563EB),
+                    showTopDivider: canManageChat || canViewPrinters,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const MobileItAssetScannerScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                _ActionListTile(
+                  title: 'تذاكر الدعم الفني',
+                  subtitle: 'متابعة طلبات الصيانة والدعم وحالة التذاكر المفتوحة',
+                  icon: Icons.confirmation_number_rounded,
+                  iconColor: ticketsColor,
+                  showTopDivider:
+                      canManageChat || canViewPrinters || canViewItAssets,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const TicketsScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BentoQuickStat extends StatelessWidget {
+  const _BentoQuickStat({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+    required this.isDark,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: isDark ? 0.14 : 0.08),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: color),
+              const Spacer(),
+              Text(
+                value,
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: isDark ? Colors.white70 : Colors.black87,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BentoFeatureCard extends StatelessWidget {
+  const _BentoFeatureCard({
+    required this.title,
+    required this.subtitle,
+    required this.badgeText,
+    required this.icon,
+    required this.accentColor,
+    required this.cardBg,
+    required this.borderCol,
+    required this.isDark,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final String badgeText;
+  final IconData icon;
+  final Color accentColor;
+  final Color cardBg;
+  final Color borderCol;
+  final bool isDark;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: cardBg,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: borderCol),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: accentColor.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: Icon(icon, color: accentColor, size: 22),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: accentColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      badgeText,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: accentColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 15,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: isDark ? Colors.white60 : Colors.black54,
+                  height: 1.3,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -441,7 +790,6 @@ class _ActionListTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
 
     return Material(
       color: Colors.transparent,
@@ -457,17 +805,17 @@ class _ActionListTile extends StatelessWidget {
                 color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
               ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
               child: Row(
                 children: [
                   Container(
-                    width: 34,
-                    height: 34,
+                    width: 40,
+                    height: 40,
                     decoration: BoxDecoration(
-                      color: iconColor,
-                      borderRadius: BorderRadius.circular(8),
+                      color: iconColor.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(icon, color: Colors.white, size: 18),
+                    child: Icon(icon, color: iconColor, size: 21),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -477,19 +825,22 @@ class _ActionListTile extends StatelessWidget {
                         Text(
                           title,
                           style: theme.textTheme.titleMedium?.copyWith(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
-                        if (subtitle.isNotEmpty)
+                        if (subtitle.isNotEmpty) ...[
+                          const SizedBox(height: 2),
                           Text(
                             subtitle,
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
+                              fontSize: 12,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
+                        ],
                       ],
                     ),
                   ),
@@ -497,7 +848,7 @@ class _ActionListTile extends StatelessWidget {
                   Icon(
                     Icons.chevron_right_rounded,
                     color: theme.colorScheme.onSurfaceVariant.withValues(
-                      alpha: 0.4,
+                      alpha: 0.45,
                     ),
                   ),
                 ],
@@ -639,15 +990,6 @@ class _AnnouncementsStripState extends State<_AnnouncementsStrip> {
                                     ).colorScheme.surfaceContainerHigh
                                   : Colors.white,
                               borderRadius: BorderRadius.circular(14),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(
-                                    alpha: isDark ? 0.1 : 0.03,
-                                  ),
-                                  blurRadius: 4,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
                             ),
                             child: Icon(
                               announcement.isPinned

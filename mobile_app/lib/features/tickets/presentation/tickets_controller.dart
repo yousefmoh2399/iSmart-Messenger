@@ -73,8 +73,14 @@ class TicketsController extends AsyncNotifier<TicketOverviewData> {
     return _repository().fetchSupportUsers();
   }
 
-  Future<void> updateSupportAgents(List<String> supportAgentIds) async {
-    await _repository().updateSupportAgents(supportAgentIds);
+  Future<void> updateSupportAgents(
+    List<String> supportAgentIds, {
+    Map<String, List<String>>? exportPermissionsByUserId,
+  }) async {
+    await _repository().updateSupportAgents(
+      supportAgentIds,
+      exportPermissionsByUserId: exportPermissionsByUserId,
+    );
     await refresh();
   }
 

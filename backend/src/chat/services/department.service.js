@@ -1,8 +1,11 @@
-const Department = require("../models/department.model");
+﻿const Department = require("../models/department.model");
 const Conversation = require("../models/conversation.model");
+const Message = require("../models/message.model");
+const ConversationMemberState = require("../models/conversation-member-state.model");
 const User = require("../../models/user.model");
 const ApiError = require("../../utils/api-error");
 const { userHasPermission } = require("./role.service");
+const { deleteFileIfExists } = require("../../utils/file.util");
 
 function isDuplicateCodeError(error) {
   return (
@@ -32,23 +35,54 @@ function serializeDepartment(department, membersCount = department.membersCount 
   };
 }
 
+const DEPARTMENT_CACHE_TTL_MS = 15000;
+let _departmentsCache = null;
+let _departmentsCacheExpiresAt = 0;
+
+function invalidateDepartmentsCache() {
+  _departmentsCache = null;
+  _departmentsCacheExpiresAt = 0;
+}
+
 async function listDepartments() {
-  const departments = await Department.find({ deletedAt: null })
-    .sort({ name: 1 })
-    .lean();
-  const counts = await Promise.all(
-    departments.map((department) =>
-      User.countDocuments({
-        $or: [
-          { departmentId: department._id },
-          { departmentIds: department._id },
-        ],
-      }),
+  if (_departmentsCache && Date.now() < _departmentsCacheExpiresAt) {
+    return _departmentsCache;
+  }
+  const [departments, aggregatedCounts] = await Promise.all([
+    Department.find({ deletedAt: null }).sort({ name: 1 }).lean(),
+    User.aggregate([
+      {
+        $project: {
+          deptSet: {
+            $setUnion: [
+              {
+                $cond: [
+                  { $ne: ["$departmentId", null] },
+                  ["$departmentId"],
+                  [],
+                ],
+              },
+              { $ifNull: ["$departmentIds", []] },
+            ],
+          },
+        },
+      },
+      { $unwind: "$deptSet" },
+      { $group: { _id: "$deptSet", count: { $sum: 1 } } },
+    ]),
+  ]);
+  const countMap = new Map(
+    aggregatedCounts.map((row) => [String(row._id), row.count]),
+  );
+  const serialized = departments.map((department) =>
+    serializeDepartment(
+      department,
+      countMap.get(department._id.toString()) || 0,
     ),
   );
-  return departments.map((department, index) =>
-    serializeDepartment(department, counts[index]),
-  );
+  _departmentsCache = serialized;
+  _departmentsCacheExpiresAt = Date.now() + DEPARTMENT_CACHE_TTL_MS;
+  return serialized;
 }
 
 async function createDepartment(actor, payload) {
@@ -88,6 +122,7 @@ async function createDepartment(actor, payload) {
     throw error;
   }
 
+  invalidateDepartmentsCache();
   return serializeDepartment(department);
 }
 
@@ -138,6 +173,7 @@ async function updateDepartment(actor, departmentId, payload) {
     throw error;
   }
 
+  invalidateDepartmentsCache();
   return serializeDepartment(department);
 }
 
@@ -180,8 +216,25 @@ async function deleteDepartment(actor, departmentId) {
     await Ticket.deleteMany({ _id: { $in: ticketIds } });
   }
 
+  // Cascade: delete messages (and their files) + member states before deleting conversations
+  const deptConvs = await Conversation.find({ departmentId: department._id }).select("_id").lean();
+  if (deptConvs.length > 0) {
+    const deptConvIds = deptConvs.map((c) => c._id);
+    // Delete physical files for messages with stored files
+    const fileMsgs = await Message.find({
+      conversationId: { $in: deptConvIds },
+      storedFilePath: { $ne: null },
+      isDeleted: { $ne: true },
+    }).select("storedFilePath").lean();
+    for (const msg of fileMsgs) {
+      await deleteFileIfExists(msg.storedFilePath);
+    }
+    await Message.deleteMany({ conversationId: { $in: deptConvIds } });
+    await ConversationMemberState.deleteMany({ conversationId: { $in: deptConvIds } });
+  }
   await Conversation.deleteMany({ departmentId: department._id });
   await Department.deleteOne({ _id: departmentId });
+  invalidateDepartmentsCache();
 }
 
 module.exports = {
@@ -190,4 +243,5 @@ module.exports = {
   updateDepartment,
   deleteDepartment,
   serializeDepartment,
+  invalidateDepartmentsCache,
 };

@@ -9,7 +9,11 @@ class ChatFoldersController extends AsyncNotifier<List<ChatFolder>> {
   @override
   FutureOr<List<ChatFolder>> build() async {
     final repository = ref.read(chatRepositoryProvider);
-    return repository.getFolders();
+    try {
+      return await repository.getFolders();
+    } catch (_) {
+      return const <ChatFolder>[];
+    }
   }
 
   Future<void> refresh() async {

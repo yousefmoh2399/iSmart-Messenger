@@ -84,7 +84,16 @@ router.post(
 
 router.use(requireAuth, requirePermission("canManageBackups"));
 
-router.post("/create", createBackupArchive);
+router.post(
+  "/create",
+  (req, res, next) => {
+    // Large backups (DB + gigabytes of files) need sufficient socket lifetime
+    req.setTimeout(2 * 60 * 60 * 1000);
+    res.setTimeout(2 * 60 * 60 * 1000);
+    next();
+  },
+  createBackupArchive,
+);
 router.get("/list", listBackupArchives);
 
 router.post(

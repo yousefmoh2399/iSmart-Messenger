@@ -9,6 +9,7 @@ class UserPreferencesStore {
   static const _localStorageDirPathKey = 'prefs_local_storage_directory_path';
   static const _preferredPrinterNameKey = 'prefs_preferred_printer_name';
   static const _notificationToneIdKey = 'prefs_notification_tone_id';
+  static const _notificationDisplayModeKey = 'prefs_notification_display_mode';
 
   Future<UserPreferences> load() async {
     final preferences = await SharedPreferences.getInstance();
@@ -27,6 +28,9 @@ class UserPreferencesStore {
       notificationToneId:
           preferences.getString(_notificationToneIdKey) ??
           NotificationTone.defaultTone.id,
+      notificationDisplayModeId:
+          preferences.getString(_notificationDisplayModeKey) ??
+          NotificationDisplayMode.defaultMode.id,
     );
   }
 
@@ -63,6 +67,10 @@ class UserPreferencesStore {
     await preferences.setString(
       _notificationToneIdKey,
       value.notificationToneId,
+    );
+    await preferences.setString(
+      _notificationDisplayModeKey,
+      value.notificationDisplayModeId,
     );
   }
 

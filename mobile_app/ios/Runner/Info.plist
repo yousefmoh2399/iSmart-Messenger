@@ -24,14 +24,16 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
-	<string>يحتاج التطبيق إلى الكاميرا لمسح المستندات ضوئيًا وأكواد QR والجرد والتقاط الصور. / The app requires camera access to scan documents and QR codes.</string>
+	<string>يحتاج التطبيق إلى الكاميرا لمسح المستندات ضوئيًا وقراءة أكواد QR والتقاط الصور. / Camera access is required to scan documents, read QR codes, and take photos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>يحتاج التطبيق إلى الوصول للصور لإرسال المرفقات واستيراد المستندات وحفظ الصور في المعرض. / The app needs photo library access to attach and save images.</string>
+	<string>يحتاج التطبيق للوصول إلى الصور لإرسال المرفقات واستيراد المستندات وحفظ الصور في المعرض. / Photo library access is required to attach, import, and save images.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>يحتاج التطبيق إلى إذن إضافة الصور لحفظ الصور والمستندات في المعرض. / The app needs permission to save images to your photo library.</string>
+	<string>يحتاج التطبيق لإذن حفظ المستندات والصور في مكتبة الصور. / Photo library permission is required to save scanned documents and photos.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>يحتاج التطبيق إلى إذن الميكروفون لتسجيل الملاحظات الصوتية داخل المحادثات. / The app needs microphone access to record voice messages.</string>
+	<string>يحتاج التطبيق إلى إذن الميكروفون لتسجيل الرسائل الصوتية داخل المحادثات. / Microphone access is required to record voice notes in chat.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>يحتاج التطبيق إلى الوصول للشبكة المحلية للاتصال بخادم العمل الداخلي. / The app uses the local network to connect to your workplace server.</string>
 	<key>NSAppTransportSecurity</key>
@@ -51,8 +53,6 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>https</string>

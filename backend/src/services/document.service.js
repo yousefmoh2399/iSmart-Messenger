@@ -42,16 +42,38 @@ function serializeDocument(document) {
 
 async function listDocumentsPage(query, options = {}) {
   const page = Math.max(1, Math.min(Number(options.page || 1), 100000));
-  const limit = Math.max(1, Math.min(Number(options.limit || 40), 100));
+  const limit = Math.max(1, Math.min(Number(options.limit || 40), 200));
   const skip = (page - 1) * limit;
+
+  const finalQuery = { ...query };
+  const search = String(options.search || options.q || "").trim();
+  if (search) {
+    const searchRegex = new RegExp(search.replace(/[.*+?^$\{\}()|[\]\\]/g, "\\$&"), "i");
+    const User = require("../models/user.model");
+    const matchingUsers = await User.find({
+      $or: [{ username: searchRegex }, { fullName: searchRegex }],
+    }).distinct("_id");
+
+    const searchOr = [{ fileName: searchRegex }];
+    if (matchingUsers.length) {
+      searchOr.push({ userId: { $in: matchingUsers } });
+    }
+    if (finalQuery.$or) {
+      finalQuery.$and = [{ $or: finalQuery.$or }, { $or: searchOr }];
+      delete finalQuery.$or;
+    } else {
+      finalQuery.$or = searchOr;
+    }
+  }
+
   const [documents, total] = await Promise.all([
-    Document.find(query)
+    Document.find(finalQuery)
       .populate("userId", "username fullName")
       .sort({ createdAt: -1, _id: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
-    Document.countDocuments(query),
+    Document.countDocuments(finalQuery),
   ]);
   return {
     documents: documents.map(serializeDocument),

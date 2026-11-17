@@ -33,8 +33,17 @@ function translateApiErrorMessage(message, statusCode) {
     return "تم تجاوز عدد المحاولات المسموح. حاول مرة أخرى بعد قليل.";
   }
   if (statusCode === 401) {
+    if (lower.includes("invalid password") || lower.includes("كلمة المرور غير صحيحة")) {
+      return "كلمة المرور غير صحيحة.";
+    }
+    if (lower.includes("invalid username") || lower.includes("اسم المستخدم غير مسجل") || lower.includes("اسم المستخدم غير صحيح")) {
+      return "اسم المستخدم غير مسجل.";
+    }
     if (lower.includes("invalid username or password")) {
       return "اسم المستخدم أو كلمة المرور غير صحيحة.";
+    }
+    if (/[\u0600-\u06FF]/.test(raw)) {
+      return raw;
     }
     return "انتهت صلاحية الجلسة أو فشل التحقق. سجل الدخول مرة أخرى.";
   }
@@ -68,6 +77,24 @@ function translateApiErrorMessage(message, statusCode) {
 }
 
 function errorHandler(error, req, res, next) {
+  // Handle client-aborted requests (e.g. user cancelled upload, socket closed unexpectedly)
+  if (
+    error?.message === "Request aborted" ||
+    error?.code === "ECONNABORTED" ||
+    res.headersSent ||
+    res.destroyed ||
+    (res.socket && res.socket.destroyed)
+  ) {
+    logger.warn("request.aborted_by_client", {
+      path: req.originalUrl,
+      method: req.method,
+      actorId: req.user?.id || null,
+      ip: req.ip,
+      errorName: error?.name,
+      errorMessage: error?.message,
+    });
+    return;
+  }
   const requestMeta = {
     ip: req.ip,
     query: sanitizeObject(req.query),
@@ -136,6 +163,48 @@ function errorHandler(error, req, res, next) {
       error: translatedMessage,
       message: translatedMessage,
       details: error.details,
+    });
+    return;
+  }
+
+  if (error?.name === "CastError") {
+    const field = error.path || "id";
+    const msg = `معرّف غير صالح للقيمة '${field}'.`;
+    res.status(400).json({
+      success: false,
+      data: null,
+      error: msg,
+      message: msg,
+    });
+    return;
+  }
+
+  if (error?.name === "ValidationError") {
+    const details = Object.values(error.errors || {}).map((e) => ({
+      field: e.path,
+      message: e.message,
+    }));
+    const msg = details[0]?.message || "فشل التحقق من صحة البيانات.";
+    res.status(400).json({
+      success: false,
+      data: null,
+      error: msg,
+      message: msg,
+      details,
+    });
+    return;
+  }
+
+  if (error?.code === 11000) {
+    const keys = Object.keys(error.keyValue || {});
+    const msg = keys.length
+      ? `القيمة المدخلة في حقل '${keys.join(", ")}' مستخدمة بالفعل.`
+      : "هذه البيانات موجودة بالفعل.";
+    res.status(409).json({
+      success: false,
+      data: null,
+      error: msg,
+      message: msg,
     });
     return;
   }

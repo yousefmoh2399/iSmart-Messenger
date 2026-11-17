@@ -100,6 +100,15 @@ Future<void> electronDebugLog(
   } catch (_) {}
 }
 
+Future<void> setTaskbarBadgeCount(int count) async {
+  if (!isElectron()) {
+    return;
+  }
+  try {
+    await _callElectron('setTaskbarBadge', count);
+  } catch (_) {}
+}
+
 void setElectronTrayActionHandler(void Function(String action)? handler) {
   _electronTrayActionSubscription?.cancel();
   _electronTrayActionSubscription = null;
@@ -177,6 +186,22 @@ Map<String, dynamic> _asStringMap(Object? value) {
   }
   if (value is JsObject) {
     final result = <String, dynamic>{};
+    try {
+      final jsKeys = context['Object']['keys'].apply([value]);
+      if (jsKeys is Iterable) {
+        for (final k in jsKeys) {
+          final key = k.toString();
+          final val = value[key];
+          if (val is JsObject) {
+            result[key] = _asStringMap(val);
+          } else {
+            result[key] = val;
+          }
+        }
+        return result;
+      }
+    } catch (_) {}
+
     for (final key in const [
       'success',
       'accepted',
@@ -210,9 +235,19 @@ Map<String, dynamic> _asStringMap(Object? value) {
       'inbox',
       'auditLogs',
       'notifications',
+      'hasFiles',
+      'files',
+      'error',
+      'responseJson',
+      'data',
     ]) {
       if (value.hasProperty(key)) {
-        result[key] = value[key];
+        final val = value[key];
+        if (val is JsObject) {
+          result[key] = _asStringMap(val);
+        } else {
+          result[key] = val;
+        }
       }
     }
     return result;
@@ -271,6 +306,75 @@ Future<bool> setElectronWindowTheme(String mode) async {
   } catch (_) {
     return false;
   }
+}
+
+Stream<dynamic>? get onWindowOnline => html.window.onOnline;
+
+Future<List<Map<String, dynamic>>?> pickElectronFiles({
+  bool allowMultiple = true,
+  bool isImageOnly = false,
+  String? title,
+}) async {
+  if (!isElectron()) {
+    return null;
+  }
+  final result = _asStringMap(
+    await _callElectron('pickFiles', {
+      'allowMultiple': allowMultiple,
+      'isImageOnly': isImageOnly,
+      if (title != null) 'title': title,
+    }),
+  );
+  if (result['success'] == true && result['canceled'] != true) {
+    final rawFiles = result['files'];
+    if (rawFiles is List) {
+      return rawFiles
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    }
+  }
+  return null;
+}
+
+Future<bool> cancelElectronDownload(String transferId) async {
+  if (!isElectron()) return false;
+  final result = _asStringMap(
+    await _callElectron('cancelDownloadAttachment', transferId),
+  );
+  return result['success'] == true;
+}
+
+Future<String?> pickElectronSavePath({
+  required String defaultFileName,
+  String? title,
+}) async {
+  if (!isElectron()) return null;
+  final result = _asStringMap(
+    await _callElectron('showSaveDialog', {
+      'fileName': defaultFileName,
+      if (title != null) 'title': title,
+    }),
+  );
+  if (result['success'] == true && result['canceled'] != true) {
+    final path = result['path']?.toString().trim();
+    return (path != null && path.isNotEmpty) ? path : null;
+  }
+  return null;
+}
+
+Future<bool> copyElectronFile({
+  required String sourcePath,
+  required String destinationPath,
+}) async {
+  if (!isElectron()) return false;
+  final result = _asStringMap(
+    await _callElectron('copyFile', {
+      'sourcePath': sourcePath,
+      'destinationPath': destinationPath,
+    }),
+  );
+  return result['success'] == true;
 }
 
 Future<String?> pickElectronDirectory({
@@ -364,6 +468,7 @@ Future<String?> downloadBytes({
   required String fileName,
   String? mimeType,
   String? preferredDirectoryPath,
+  String? targetFilePath,
 }) async {
   if (isElectron()) {
     final result = _asStringMap(
@@ -371,6 +476,8 @@ Future<String?> downloadBytes({
         'base64': base64Encode(bytes),
         'fileName': fileName,
         'mimeType': mimeType,
+        if (targetFilePath != null && targetFilePath.trim().isNotEmpty)
+          'filePath': targetFilePath.trim(),
         if (preferredDirectoryPath != null &&
             preferredDirectoryPath.trim().isNotEmpty)
           'directoryPath': preferredDirectoryPath.trim(),
@@ -462,7 +569,8 @@ Future<void> archiveElectronChatAttachment({
   required String messageId,
   required String sha256Hex,
   required String fileName,
-  required Uint8List bytes,
+  Uint8List? bytes,
+  String? sourcePath,
   String? preferredDirectoryPath,
 }) async {
   if (!isElectron()) return;
@@ -470,28 +578,53 @@ Future<void> archiveElectronChatAttachment({
     'messageId': messageId,
     'sha256Hex': sha256Hex,
     'fileName': fileName,
-    'base64': base64Encode(bytes),
+    if (sourcePath != null && sourcePath.isNotEmpty) 'sourcePath': sourcePath,
+    if (bytes != null && bytes.isNotEmpty) 'base64': base64Encode(bytes),
     if (preferredDirectoryPath != null &&
         preferredDirectoryPath.trim().isNotEmpty)
       'directoryPath': preferredDirectoryPath.trim(),
   });
 }
 
-Future<void> cacheElectronChatAttachment({
+Future<String?> getElectronCachedAttachmentPath({
+  required String messageId,
+  required String fileName,
+  String? preferredDirectoryPath,
+}) async {
+  if (!isElectron()) return null;
+  final result = _asStringMap(
+    await _callElectron('getChatAttachmentPath', {
+      'messageId': messageId,
+      'fileName': fileName,
+      if (preferredDirectoryPath != null &&
+          preferredDirectoryPath.trim().isNotEmpty)
+        'directoryPath': preferredDirectoryPath.trim(),
+    }),
+  );
+  if (result['success'] == true && result['exists'] == true) {
+    final p = result['path']?.toString().trim();
+    return (p != null && p.isNotEmpty) ? p : null;
+  }
+  return null;
+}
+
+Future<String?> cacheElectronChatAttachment({
   required String messageId,
   required String fileName,
   required Uint8List bytes,
   String? preferredDirectoryPath,
 }) async {
-  if (!isElectron()) return;
-  await _callElectron('cacheChatAttachment', {
+  if (!isElectron()) return null;
+  final result = _asStringMap(await _callElectron('cacheChatAttachment', {
     'messageId': messageId,
     'fileName': fileName,
     'base64': base64Encode(bytes),
     if (preferredDirectoryPath != null &&
         preferredDirectoryPath.trim().isNotEmpty)
       'directoryPath': preferredDirectoryPath.trim(),
-  });
+  }));
+  final savedPath = result['path']?.toString().trim();
+  return (savedPath != null && savedPath.isNotEmpty) ? savedPath : null;
 }
 
 Future<Uint8List?> readElectronCachedChatAttachment({
@@ -652,7 +785,12 @@ Future<void> showBrowserNotification({
   if (permission != 'granted') {
     return;
   }
-  html.Notification(title, body: body);
+  final notif = html.Notification(title, body: body);
+  Timer(const Duration(seconds: 5), () {
+    try {
+      notif.close();
+    } catch (_) {}
+  });
 }
 
 bool isPageVisible() {
@@ -1090,17 +1228,29 @@ Future<Map<String, dynamic>> startElectronUpdate({
   required String downloadUrl,
   String? token,
   String? checksumSha256,
+  String? fileName,
+  String? silentInstallArgs,
+  String? installerKind,
+  String? branchCode,
+  String? deviceUid,
 }) async {
   final result = await _callElectron('startUpdate', {
     'downloadUrl': downloadUrl,
     if (token != null) 'token': token,
     if (checksumSha256 != null) 'checksumSha256': checksumSha256,
+    if (fileName != null) 'fileName': fileName,
+    if (silentInstallArgs != null) 'silentInstallArgs': silentInstallArgs,
+    if (installerKind != null) 'installerKind': installerKind,
+    if (branchCode != null && branchCode.trim().isNotEmpty)
+      'branchCode': branchCode.trim().toUpperCase(),
+    if (deviceUid != null && deviceUid.trim().isNotEmpty)
+      'deviceUid': deviceUid.trim(),
   });
   return _asStringMap(result);
 }
 
-Future<Map<String, dynamic>> applyElectronUpdate() async {
-  final result = await _callElectron('applyUpdate');
+Future<Map<String, dynamic>> applyElectronUpdate([Map<String, dynamic>? options]) async {
+  final result = await _callElectron('applyUpdate', options ?? {});
   return _asStringMap(result);
 }
 
@@ -1138,6 +1288,19 @@ Future<String?> electronCaptureWindow(int windowId) async {
 }
 
 /// Returns base64-encoded PNG data or null on failure.
+Future<Map<String, dynamic>> getPreparedElectronUpdate([Map<String, dynamic>? options]) async {
+  if (!isElectron()) {
+    return const <String, dynamic>{'prepared': false};
+  }
+  try {
+    return _asStringMap(
+      await _callElectron('getPreparedUpdate', options ?? const <String, dynamic>{}),
+    );
+  } catch (_) {
+    return const <String, dynamic>{'prepared': false};
+  }
+}
+
 Future<String?> electronCaptureScreen() async {
   final result = _asStringMap(await _callElectron('captureScreen'));
   if (result['success'] != true) return null;
@@ -1149,4 +1312,205 @@ Future<String?> electronCaptureScreen() async {
 Future<bool> electronOpenRdp(String ip) async {
   final result = _asStringMap(await _callElectron('openRdp', {'ip': ip}));
   return result['success'] == true;
+}
+
+Future<bool> electronOpenPing(String ip) async {
+  final result = _asStringMap(await _callElectron('openPing', {'ip': ip}));
+  return result['success'] == true;
+}
+
+Future<Map<String, dynamic>> electronProbePeerStatus(String ip) async {
+  if (!isElectron()) {
+    return const <String, dynamic>{
+      'success': false,
+      'message': 'فحص الاتصال عبر Electron غير متاح.',
+    };
+  }
+  return _asStringMap(await _callElectron('probePeerStatus', {'ip': ip}));
+}
+
+Future<Map<String, dynamic>> electronGetStorageBreakdown({String? directoryPath}) async {
+  if (!isElectron()) return const <String, dynamic>{'success': false};
+  return _asStringMap(await _callElectron('getStorageBreakdown', {'directoryPath': directoryPath}));
+}
+
+Future<bool> electronClearStorageCache({required String category, String? directoryPath}) async {
+  if (!isElectron()) return false;
+  final result = _asStringMap(await _callElectron('clearStorageCache', {
+    'category': category,
+    'directoryPath': directoryPath,
+  }));
+  return result['success'] == true;
+}
+
+Future<Map<String, dynamic>> electronReadClipboardFiles() async {
+  if (!isElectron()) {
+    return const <String, dynamic>{
+      'success': false,
+      'hasFiles': false,
+      'files': <Map<String, dynamic>>[],
+    };
+  }
+  try {
+    final raw = await _callElectron('readClipboardFiles');
+    final map = _asStringMap(raw);
+    final rawFiles = map['files'];
+    final parsedFiles = <Map<String, dynamic>>[];
+    if (rawFiles is List) {
+      for (final item in rawFiles) {
+        if (item is Map) {
+          parsedFiles.add(Map<String, dynamic>.from(item));
+        } else if (item is JsObject) {
+          final fileMap = <String, dynamic>{};
+          for (final k in const ['name', 'path', 'size', 'base64', 'isImage']) {
+            if (item.hasProperty(k)) {
+              fileMap[k] = item[k];
+            }
+          }
+          if (fileMap.isNotEmpty) {
+            parsedFiles.add(fileMap);
+          }
+        }
+      }
+    }
+    return <String, dynamic>{
+      'success': map['success'] == true,
+      'hasFiles': map['hasFiles'] == true && parsedFiles.isNotEmpty,
+      'files': parsedFiles,
+      if (map['error'] != null) 'error': map['error'].toString(),
+    };
+  } catch (e) {
+    return <String, dynamic>{
+      'success': false,
+      'hasFiles': false,
+      'files': const <Map<String, dynamic>>[],
+      'error': e.toString(),
+    };
+  }
+}
+StreamSubscription? listenToElectronUploadProgress(void Function(Map<String, dynamic> data) handler) {
+  if (!isElectron()) return null;
+  return html.window.on['electron-upload-progress'].listen((event) {
+    final detail = (event as dynamic).detail;
+    if (detail is String && detail.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(detail);
+        if (decoded is Map<String, dynamic>) {
+          handler(decoded);
+        }
+      } catch (_) {}
+    }
+  });
+}
+
+StreamSubscription? listenToElectronDownloadProgress(void Function(Map<String, dynamic> data) handler) {
+  if (!isElectron()) return null;
+  return html.window.on['electron-download-progress'].listen((event) {
+    final detail = (event as dynamic).detail;
+    if (detail is String && detail.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(detail);
+        if (decoded is Map<String, dynamic>) {
+          handler(decoded);
+        }
+      } catch (_) {}
+    }
+  });
+}
+
+Future<Map<String, dynamic>> uploadElectronChatAttachment({
+  required String url,
+  required String filePath,
+  String? token,
+  required String conversationId,
+  String? content,
+  String? replyToMessageId,
+  String? fileName,
+  Map<String, dynamic>? metadata,
+  String? transferId,
+  void Function(int sent, int total)? onProgress,
+}) async {
+  if (!isElectron()) {
+    return const {'success': false, 'error': 'Electron not available'};
+  }
+  final effectiveTransferId = transferId ?? 'upl_${DateTime.now().microsecondsSinceEpoch}';
+  StreamSubscription? sub;
+  if (onProgress != null) {
+    sub = listenToElectronUploadProgress((data) {
+      if (data['transferId'] == effectiveTransferId) {
+        final sent = (data['sent'] as num?)?.toInt() ?? 0;
+        final total = (data['total'] as num?)?.toInt() ?? 0;
+        onProgress(sent, total);
+      }
+    });
+  }
+  try {
+    final res = await _callElectron('uploadChatAttachment', {
+      'url': url,
+      'filePath': filePath,
+      if (token != null && token.isNotEmpty) 'token': token,
+      'conversationId': conversationId,
+      if (content != null && content.isNotEmpty) 'content': content,
+      if (replyToMessageId != null && replyToMessageId.isNotEmpty) 'replyToMessageId': replyToMessageId,
+      if (fileName != null && fileName.isNotEmpty) 'fileName': fileName,
+      if (metadata != null) 'metadata': jsonEncode(metadata),
+      'transferId': effectiveTransferId,
+    });
+    return _asStringMap(res);
+  } finally {
+    await sub?.cancel();
+  }
+}
+
+Future<Map<String, dynamic>> cancelElectronUpload(String transferId) async {
+  if (!isElectron()) {
+    return const {'success': false, 'error': 'Electron not available'};
+  }
+  try {
+    final res = await _callElectron('cancelUploadAttachment', transferId);
+    return _asStringMap(res);
+  } catch (e) {
+    return {'success': false, 'error': e.toString()};
+  }
+}
+
+Future<Map<String, dynamic>> downloadElectronChatAttachment({
+  required String url,
+  required String destinationPath,
+  String? token,
+  String? transferId,
+  void Function(int received, int total)? onProgress,
+}) async {
+  if (!isElectron()) {
+    return const {'success': false, 'error': 'Electron not available'};
+  }
+  final effectiveTransferId = transferId ?? 'dwn_${DateTime.now().microsecondsSinceEpoch}';
+  StreamSubscription? sub;
+  if (onProgress != null) {
+    sub = listenToElectronDownloadProgress((data) {
+      if (data['transferId'] == effectiveTransferId) {
+        final received = (data['received'] as num?)?.toInt() ?? 0;
+        final total = (data['total'] as num?)?.toInt() ?? 0;
+        onProgress(received, total);
+      }
+    });
+  }
+  try {
+    final res = await _callElectron('downloadChatAttachment', {
+      'url': url,
+      'destinationPath': destinationPath,
+      if (token != null && token.isNotEmpty) 'token': token,
+      'transferId': effectiveTransferId,
+    });
+    return _asStringMap(res);
+  } finally {
+    await sub?.cancel();
+  }
+}
+
+Future<String> calculateElectronFileSha256(String filePath) async {
+  if (!isElectron()) return '';
+  final res = await _callElectron('calculateFileSha256', {'filePath': filePath});
+  final map = _asStringMap(res);
+  return map['sha256']?.toString() ?? '';
 }

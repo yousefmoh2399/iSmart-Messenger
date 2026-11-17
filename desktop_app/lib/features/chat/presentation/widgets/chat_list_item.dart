@@ -5,14 +5,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../shared/providers/providers.dart';
 import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../models/chat_models.dart';
+import '../chat_appearance.dart';
 import 'chat_ui_helpers.dart';
 
-class ChatListItem extends StatefulWidget {
+class ChatListItem extends ConsumerStatefulWidget {
   const ChatListItem({
     super.key,
     required this.conversation,
     required this.currentUserId,
     this.typingPreviewText,
+    this.unreadBadgeColor,
     required this.selected,
     required this.onTap,
     required this.onTogglePin,
@@ -25,6 +27,7 @@ class ChatListItem extends StatefulWidget {
   final ChatConversation conversation;
   final String currentUserId;
   final String? typingPreviewText;
+  final Color? unreadBadgeColor;
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback onTogglePin;
@@ -34,15 +37,29 @@ class ChatListItem extends StatefulWidget {
   final VoidCallback onDeleteConversation;
 
   @override
-  State<ChatListItem> createState() => _ChatListItemState();
+  ConsumerState<ChatListItem> createState() => _ChatListItemState();
 }
 
-class _ChatListItemState extends State<ChatListItem> {
+class _ChatListItemState extends ConsumerState<ChatListItem> {
   bool _isHovered = false;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final unreadColor = widget.unreadBadgeColor ?? () {
+      final prefs = ref.watch(authControllerProvider).valueOrNull?.chatPreferences;
+      final hex = prefs?.unreadBadgeColorHex.trim().isNotEmpty == true
+          ? prefs!.unreadBadgeColorHex
+          : prefs?.customTheme.unreadBadgeColorHex;
+      if (hex != null && hex.trim().isNotEmpty) {
+        try {
+          return ChatAppearanceCatalog.colorFromHex(hex);
+        } catch (_) {}
+      }
+      return const Color(0xFFE53935);
+    }();
     final peer = widget.conversation.type == 'direct'
         ? widget.conversation.members
               .where((entry) => entry.id != widget.currentUserId)
@@ -52,16 +69,87 @@ class _ChatListItemState extends State<ChatListItem> {
     final accent = conversationTypeAccent(widget.conversation.type);
     final title = widget.conversation.displayTitle(widget.currentUserId);
     final preview =
-        widget.typingPreviewText ?? _previewText(widget.conversation);
+        widget.typingPreviewText ?? _previewText(widget.conversation, widget.currentUserId);
     final avatarLabel = (peer?.displayName ?? title).trim();
+    final String tooltipMessage = (peer?.jobTitle.trim().isNotEmpty == true)
+        ? '$title\n💼 ${peer!.jobTitle.trim()}'
+        : (peer != null && peer.branchCode.isNotEmpty
+            ? '$title • فرع ${peer.branchCode}'
+            : title);
     final onSurfaceVariant = colorScheme.onSurfaceVariant;
     final selectionColor = colorScheme.primary.withValues(alpha: 0.14);
     final hoverColor = colorScheme.onSurface.withValues(alpha: 0.04);
     final inactiveColor = colorScheme.surfaceContainerHighest;
     final isTypingPreview = widget.typingPreviewText != null;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
+    final lastMessage = widget.conversation.lastMessage;
+    final myId = widget.currentUserId.trim();
+    bool isMyLastMessage = false;
+
+    if (!isTypingPreview && lastMessage != null) {
+      if (widget.conversation.isSelfChat(myId)) {
+        isMyLastMessage = true;
+      } else if (lastMessage.status == 'pending' ||
+          (lastMessage.id != null && lastMessage.id!.startsWith('temp_'))) {
+        isMyLastMessage = true;
+      } else {
+        final senderId = (lastMessage.senderId ?? '').trim();
+        if (myId.isNotEmpty && senderId.isNotEmpty && senderId == myId) {
+          isMyLastMessage = true;
+        } else if (widget.conversation.type == 'direct') {
+          final others = widget.conversation.members
+              .where((m) => m.id.trim() != myId)
+              .toList();
+          if (others.length == 1) {
+            final peerId = others.first.id.trim();
+            if (peerId.isNotEmpty && senderId.isNotEmpty) {
+              isMyLastMessage = senderId != peerId;
+            }
+          }
+        }
+      }
+    }
+
+    Widget? statusIcon;
+    if (isMyLastMessage && lastMessage != null) {
+      if (lastMessage.status == 'pending' ||
+          (lastMessage.id != null && lastMessage.id!.startsWith('temp_'))) {
+        statusIcon = const Icon(
+          Icons.access_time_rounded,
+          size: 13.5,
+          color: Color(0xFF8696A0),
+        );
+      } else if (lastMessage.status == 'failed') {
+        statusIcon = const Icon(
+          Icons.error_outline_rounded,
+          size: 14.5,
+          color: Color(0xFFEF4444),
+        );
+      } else if (lastMessage.isSeenByAny(myId) ||
+          widget.conversation.isSelfChat(myId)) {
+        statusIcon = const Icon(
+          Icons.done_all_rounded,
+          size: 15.5,
+          color: Color(0xFF53BDEB),
+        );
+      } else if (lastMessage.isDeliveredToAny(myId)) {
+        statusIcon = const Icon(
+          Icons.done_all_rounded,
+          size: 15.5,
+          color: Color(0xFF8696A0),
+        );
+      } else {
+        statusIcon = const Icon(
+          Icons.done_rounded,
+          size: 15.5,
+          color: Color(0xFF8696A0),
+        );
+      }
+    }
+
+    return RepaintBoundary(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
         final isNarrow = constraints.maxWidth < 320;
         final avatarRadius = isNarrow ? 20.0 : 24.0;
         final horizontalPadding = isNarrow ? 8.0 : 12.0;
@@ -141,7 +229,7 @@ class _ChatListItemState extends State<ChatListItem> {
                           SafeNetworkAvatar(
                             radius: avatarRadius,
                             backgroundColor: accent.withValues(alpha: 0.16),
-                            imageUrl: peer?.avatarUrl,
+                            imageUrl: (widget.conversation.type == 'direct' ? peer?.avatarUrl : widget.conversation.avatarUrl) ?? widget.conversation.avatarUrl ?? peer?.avatarUrl,
                             fallbackText: avatarLabel.isEmpty
                                 ? '?'
                                 : avatarLabel.substring(0, 1).toUpperCase(),
@@ -177,19 +265,48 @@ class _ChatListItemState extends State<ChatListItem> {
                             Row(
                               children: [
                                 Expanded(
-                                  child: Text(
-                                    title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleSmall
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.w700,
-                                          // color: selected
-                                          //     ? const Colors.black
-                                          //     : const Colors.white,
-                                        ),
+                                  child: Tooltip(
+                                    message: tooltipMessage,
+                                    waitDuration: const Duration(milliseconds: 250),
+                                    showDuration: const Duration(seconds: 4),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF1C1C1E).withValues(alpha: 0.94),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: Colors.white.withValues(alpha: 0.15),
+                                        width: 0.8,
+                                      ),
+                                    ),
+                                    textStyle: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      fontFamily: 'NotoSans',
+                                      fontFamilyFallback: [
+                                        'NotoSansArabic',
+                                        'Segoe UI Emoji',
+                                        'Segoe UI Symbol',
+                                        'Apple Color Emoji',
+                                        'Segoe UI',
+                                        'Tahoma',
+                                        'Arial',
+                                      ],
+                                    ),
+                                    child: Text(
+                                      title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
                                   ),
                                 ),
                                 if (widget.conversation.isPinned)
@@ -210,7 +327,7 @@ class _ChatListItemState extends State<ChatListItem> {
                                       color: Color(0xFFFFC107),
                                     ),
                                   ),
-                                if (widget.conversation.isMuted)
+                                if (widget.conversation.isCurrentlyMuted)
                                   const Padding(
                                     padding: EdgeInsets.only(left: 4),
                                     child: Icon(
@@ -247,8 +364,14 @@ class _ChatListItemState extends State<ChatListItem> {
                                         .textTheme
                                         .labelSmall
                                         ?.copyWith(
-                                          color: onSurfaceVariant,
-                                          fontWeight: FontWeight.w600,
+                                          color: widget.conversation.unreadCount > 0
+                                              ? (isDark
+                                                  ? unreadColor.withValues(alpha: 0.95)
+                                                  : unreadColor)
+                                              : onSurfaceVariant,
+                                          fontWeight: widget.conversation.unreadCount > 0
+                                              ? FontWeight.w700
+                                              : FontWeight.w600,
                                         ),
                                   ),
                                 ],
@@ -257,6 +380,10 @@ class _ChatListItemState extends State<ChatListItem> {
                             const SizedBox(height: 4),
                             Row(
                               children: [
+                                if (statusIcon != null) ...[
+                                  statusIcon,
+                                  const SizedBox(width: 4),
+                                ],
                                 Expanded(
                                   child: Text(
                                     preview,
@@ -266,12 +393,16 @@ class _ChatListItemState extends State<ChatListItem> {
                                         ?.copyWith(
                                           color: isTypingPreview
                                               ? colorScheme.primary
+                                              : widget.conversation.unreadCount > 0
+                                              ? (isDark
+                                                  ? unreadColor.withValues(alpha: 0.95)
+                                                  : unreadColor)
                                               : widget.conversation.isActive
                                               ? onSurfaceVariant
                                               : onSurfaceVariant.withValues(
                                                   alpha: 0.68,
                                                 ),
-                                          fontWeight: isTypingPreview
+                                          fontWeight: (isTypingPreview || widget.conversation.unreadCount > 0)
                                               ? FontWeight.w700
                                               : FontWeight.w500,
                                         ),
@@ -285,8 +416,15 @@ class _ChatListItemState extends State<ChatListItem> {
                                       vertical: 3,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: colorScheme.primary,
+                                      color: unreadColor,
                                       borderRadius: BorderRadius.circular(999),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: unreadColor.withValues(alpha: 0.35),
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 1),
+                                        ),
+                                      ],
                                     ),
                                     child: Text(
                                       '${widget.conversation.unreadCount}',
@@ -355,7 +493,7 @@ class _ChatListItemState extends State<ChatListItem> {
                           PopupMenuItem(
                             value: 'mute',
                             child: Text(
-                              widget.conversation.isMuted
+                              widget.conversation.isCurrentlyMuted
                                   ? 'إلغاء الكتم'
                                   : 'كتم المحادثة',
                             ),
@@ -399,11 +537,12 @@ class _ChatListItemState extends State<ChatListItem> {
         
         ));
       },
+      ),
     );
   }
 }
 
-String _previewText(ChatConversation conversation) {
+String _previewText(ChatConversation conversation, [String? currentUserId]) {
   final lastMessage = conversation.lastMessage;
   if (lastMessage == null) {
     return 'ابدأ المحادثة الآن';
@@ -423,9 +562,17 @@ String _previewText(ChatConversation conversation) {
           _ => 'رسالة',
         };
 
-  if (conversation.type == 'direct' || lastMessage.senderName.trim().isEmpty) {
-    return body;
+  final cleanBody = body.replaceAll(RegExp(r'[\r\n]+'), ' ');
+
+  final isMe = currentUserId != null &&
+      lastMessage.senderId != null &&
+      lastMessage.senderId == currentUserId;
+
+  if (conversation.type == 'direct' ||
+      lastMessage.senderName.trim().isEmpty ||
+      isMe) {
+    return cleanBody;
   }
 
-  return '${lastMessage.senderName}: $body';
+  return '${lastMessage.senderName}: $cleanBody';
 }

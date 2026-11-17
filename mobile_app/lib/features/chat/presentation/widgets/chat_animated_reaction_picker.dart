@@ -4,6 +4,7 @@ import 'package:animated_emoji/animated_emoji.dart';
 import 'package:flutter/material.dart';
 
 import '../../utils/chat_reaction_emoji_stats.dart';
+import 'bundled_quick_emoji.dart';
 
 /// إيموجيات افتراضية لصف الاختصار إن لم يوجد تاريخ استخدام بعد.
 const List<String> kDefaultQuickReactionEmojis = <String>[
@@ -174,12 +175,11 @@ class ChatOfflineLottieEmoji extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Text(
-        data.toUnicodeEmoji(),
-        textAlign: TextAlign.center,
-        style: TextStyle(fontSize: size * 0.62, height: 1.0),
-      ),
+    return BundledQuickEmoji(
+      emoji: data.toUnicodeEmoji(),
+      size: size,
+      animate: animate,
+      repeat: repeat,
     );
   }
 }

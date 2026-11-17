@@ -78,6 +78,120 @@ class LocalDocumentStore {
     return validUploads;
   }
 
+  Future<List<PendingUpload>> loadAllLocalDocuments() async {
+    final map = <String, PendingUpload>{};
+    final seenPaths = <String>{};
+
+    final pending = await loadPendingUploads();
+    for (final item in pending) {
+      map[item.id] = item;
+      seenPaths.add(item.filePath);
+    }
+
+    const mediaStorage = LocalMediaStorageService();
+    final directories = <Directory>[
+      await getDownloadsDirectory(),
+      await mediaStorage.documentsDirectory(),
+      await mediaStorage.incomingDirectory(),
+      await getPendingDirectory(),
+    ];
+
+    final uuidPrefixRegex = RegExp(r'^([0-9a-fA-F-]{36})_(.+)$');
+    for (final dir in directories) {
+      try {
+        if (!await dir.exists()) continue;
+        final entities = dir.listSync(recursive: false);
+        for (final entity in entities) {
+          if (entity is! File) continue;
+          final filePath = entity.path;
+          if (seenPaths.contains(filePath)) continue;
+          final base = path.basename(filePath);
+          if (!base.toLowerCase().endsWith('.pdf')) continue;
+
+          var id = base;
+          var displayFileName = base;
+          final match = uuidPrefixRegex.firstMatch(base);
+          if (match != null) {
+            id = match.group(1)!;
+            displayFileName = match.group(2)!;
+          }
+          if (map.containsKey(id)) continue;
+
+          final stat = await entity.stat();
+          if (stat.size <= 0) continue;
+          seenPaths.add(filePath);
+          map[id] = PendingUpload(
+            id: id,
+            fileName: displayFileName,
+            filePath: filePath,
+            pageCount: 1,
+            fileSize: stat.size,
+            createdAt: stat.modified,
+          );
+        }
+      } catch (_) {}
+    }
+
+    final list = map.values.toList();
+    list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return list;
+  }
+
+  Future<PendingUpload> importLocalPdfFile({
+    required String sourcePath,
+    String? fileName,
+  }) async {
+    final sourceFile = File(sourcePath);
+    if (!await sourceFile.exists()) {
+      throw Exception('الملف المحدد غير موجود.');
+    }
+    final bytes = await sourceFile.readAsBytes();
+    final resolvedName = sanitizePdfName(
+      fileName != null && fileName.trim().isNotEmpty
+          ? fileName.trim()
+          : path.basename(sourcePath),
+    );
+    return createPendingUpload(
+      fileName: resolvedName,
+      pdfBytes: bytes,
+      pageCount: 1,
+    );
+  }
+
+  Future<void> deleteLocalDocument(String id, {String? filePath}) async {
+    await removePendingUpload(id);
+    if (filePath != null && filePath.isNotEmpty) {
+      final f = File(filePath);
+      if (await f.exists()) {
+        try {
+          await f.delete();
+        } catch (_) {}
+      }
+    }
+    const mediaStorage = LocalMediaStorageService();
+    final directories = <Directory>[
+      await getDownloadsDirectory(),
+      await mediaStorage.documentsDirectory(),
+      await mediaStorage.incomingDirectory(),
+      await getPendingDirectory(),
+    ];
+    for (final dir in directories) {
+      try {
+        if (!await dir.exists()) continue;
+        for (final entity in dir.listSync(recursive: false)) {
+          if (entity is File) {
+            final base = path.basename(entity.path);
+            if (base == id || base.startsWith('${id}_')) {
+              try {
+                await entity.delete();
+              } catch (_) {}
+            }
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
   Future<void> _savePendingUploads(List<PendingUpload> uploads) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(
@@ -128,7 +242,6 @@ class LocalDocumentStore {
     );
     await pendingFile.writeAsBytes(pdfBytes, flush: true);
 
-    // التحقق الصريح من سلامة بايتات الـ PDF
     final headerBytes = await pendingFile.openRead(0, 5).first;
     final headerString = String.fromCharCodes(headerBytes);
     if (headerString != '%PDF-') {
@@ -156,12 +269,6 @@ class LocalDocumentStore {
     }
 
     return pendingFile;
-    /*
-    throw Exception(
-      'تعذر حفظ الملف في المسار المطلوب أو في مجلد التطبيق الآمن. ${lastError ?? ''}'
-          .trim(),
-    );
-*/
   }
 
   Future<void> removePendingUpload(String id) async {
@@ -226,18 +333,15 @@ class LocalDocumentStore {
     if (storedPath.isEmpty) return storedPath;
     final appDir = await _appDirectory();
 
-    // 1. If storedPath exists as an absolute path as-is
     if (File(storedPath).existsSync()) {
       return storedPath;
     }
 
-    // 2. If it is already a relative path, e.g. "drafts/sessionId/page.jpg"
     final resolvedDirect = path.join(appDir.path, storedPath);
     if (File(resolvedDirect).existsSync()) {
       return resolvedDirect;
     }
 
-    // 3. Transparent migration: if storedPath is an old absolute path from an earlier iOS container UUID
     final draftsIndex = storedPath.indexOf('drafts');
     if (draftsIndex != -1) {
       final subPath = storedPath.substring(draftsIndex);
@@ -265,7 +369,10 @@ class LocalDocumentStore {
       }),
     );
     final relativeSession = session.copyWith(pages: relativePages);
-    await preferences.setString(_scanDraftKey, jsonEncode(relativeSession.toJson()));
+    await preferences.setString(
+      _scanDraftKey,
+      jsonEncode(relativeSession.toJson()),
+    );
   }
 
   Future<ScanSession?> loadDraft() async {
@@ -286,7 +393,8 @@ class LocalDocumentStore {
           ? await _toAbsolutePath(page.originalPath!)
           : null;
 
-      if (absImagePath != page.imagePath || absOriginalPath != page.originalPath) {
+      if (absImagePath != page.imagePath ||
+          absOriginalPath != page.originalPath) {
         migrated = true;
       }
 

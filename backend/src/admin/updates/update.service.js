@@ -137,9 +137,18 @@ function normalizeLocalIp(value) {
   }
   const ipv4Match = raw.match(/(?:\d{1,3}\.){3}\d{1,3}/);
   if (ipv4Match && ipv4Match[0]) {
-    return ipv4Match[0].trim();
+    const ip = ipv4Match[0].trim();
+    if (
+      ip.startsWith("127.") ||
+      ip.startsWith("169.254.") ||
+      ip === "0.0.0.0" ||
+      ip === "255.255.255.255"
+    ) {
+      return null;
+    }
+    return ip;
   }
-  return raw || null;
+  return null;
 }
 
 function normalizePlatform(value, fallback = "desktop_windows") {
@@ -149,7 +158,13 @@ function normalizePlatform(value, fallback = "desktop_windows") {
   if (raw === "mobile" || raw === "android" || raw === "mobile_android") {
     return "mobile_android";
   }
-  if (raw === "desktop" || raw === "windows" || raw === "desktop_windows") {
+  if (
+    raw === "desktop" ||
+    raw === "windows" ||
+    raw === "desktop_windows" ||
+    raw === "desktop_electron" ||
+    raw === "electron"
+  ) {
     return "desktop_windows";
   }
   return fallback;
@@ -290,6 +305,10 @@ function serializeRelease(
     targetArchitecture: release.targetArchitecture || "x64",
     minWindowsBuild: release.minWindowsBuild || null,
     rolloutPercentage: clampNumber(release.rolloutPercentage, 1, 100, 100),
+    targetType: release.targetType || "job_only",
+    targetBranches: Array.isArray(release.targetBranches)
+      ? release.targetBranches
+      : [],
     silentInstallArgs: release.silentInstallArgs || "",
     checksumSha256: release.checksumSha256 || null,
     fileName: release.fileName || null,
@@ -632,15 +651,15 @@ async function registerDeviceHeartbeat(actor, payload = {}, requestMeta = {}) {
     await task.save();
 
     device.updateState = {
-      status: "failed",
-      currentTaskId: task._id,
-      targetVersion: task.releaseVersion,
-      progress: task.progress || 0,
+      status: "idle",
+      currentTaskId: null,
+      targetVersion: null,
+      progress: 0,
       lastError: message,
       updatedAt: now,
     };
     await device.save();
-    await recalculateJobStats(task.jobId);
+    if (task.jobId) await recalculateJobStats(task.jobId);
   };
 
   const completeTaskForCurrentVersion = async (task, message) => {
@@ -669,6 +688,20 @@ async function registerDeviceHeartbeat(actor, payload = {}, requestMeta = {}) {
     await device.save();
     await recalculateJobStats(task.jobId);
   };
+
+  if (activeTask && !activeTask.releaseId) {
+    await failTask(
+      activeTask,
+      "تم إلغاء التحديث لأن الإصدار لم يعد موجوداً على السيرفر.",
+    );
+    activeTask = null;
+  } else if (activeTask && activeTask.releaseId.isEnabled === false) {
+    await failTask(
+      activeTask,
+      "تم إلغاء التحديث لأن الإصدار معطل من قبل الإدارة.",
+    );
+    activeTask = null;
+  }
 
   if (activeTask && (activeTask.attempts || 0) >= MAX_TASK_ATTEMPTS) {
     await failTask(
@@ -717,6 +750,20 @@ async function registerDeviceHeartbeat(actor, payload = {}, requestMeta = {}) {
   if (pendingTasks.length > 0) {
     const validTasks = [];
     for (const task of pendingTasks) {
+      if (!task.releaseId) {
+        await failTask(
+          task,
+          "تم إلغاء التحديث لأن الإصدار لم يعد موجوداً على السيرفر.",
+        );
+        continue;
+      }
+      if (task.releaseId.isEnabled === false) {
+        await failTask(
+          task,
+          "تم إلغاء التحديث لأن الإصدار معطل من قبل الإدارة.",
+        );
+        continue;
+      }
       if ((task.attempts || 0) >= MAX_TASK_ATTEMPTS) {
         await failTask(
           task,
@@ -738,11 +785,35 @@ async function registerDeviceHeartbeat(actor, payload = {}, requestMeta = {}) {
 
   const baseUrlOverride = requestMeta.baseUrlOverride;
 
+  let latestReleaseDoc = null;
+  if (pendingTasks.length > 0 && pendingTasks[0].releaseId) {
+    // If device is explicitly assigned an active task, its target release is that task's release
+    latestReleaseDoc = pendingTasks[0].releaseId;
+  } else {
+    // Only return a release passively if it explicitly targets all branches or this device's branch.
+    // Releases configured as 'job_only' (the default) require an explicit rollout job and are never pushed passively.
+    const branchCode = normalizeBranchCode(device.branchCode);
+    const releaseQuery = {
+      platform: device.platform || "desktop_windows",
+      isEnabled: true,
+      $or: [
+        { targetType: "all" },
+        { targetType: "branch", targetBranches: branchCode },
+      ],
+    };
+    latestReleaseDoc = await UpdateRelease.findOne(releaseQuery)
+      .sort({ createdAt: -1 })
+      .lean();
+  }
+
   return {
     device: serializeDevice(device),
     pendingTasks: pendingTasks.map((task) =>
       serializeTask(task, task.releaseId, { baseUrlOverride }),
     ),
+    latestRelease: latestReleaseDoc
+      ? serializeRelease(latestReleaseDoc, { baseUrlOverride })
+      : null,
     heartbeatIntervalSeconds: 30,
     serverTime: nowIso(),
   };
@@ -943,7 +1014,11 @@ async function createRelease(actor, payload = {}, artifactFile = null) {
       ? "installer"
       : payload.packageLayout === "apk"
         ? "apk"
-        : "bundle_zip";
+        : payload.packageLayout === "bundle_zip"
+          ? "bundle_zip"
+          : (resolvedInstallerKind === "exe" || resolvedInstallerKind === "msi")
+            ? "installer"
+            : (resolvedInstallerKind === "apk" ? "apk" : "bundle_zip");
   const entryExecutable =
     String(payload.entryExecutable || "")
       .trim()
@@ -963,6 +1038,26 @@ async function createRelease(actor, payload = {}, artifactFile = null) {
       .slice(0, 80) || null;
   const rolloutPercentage = clampNumber(payload.rolloutPercentage, 1, 100, 100);
 
+  const targetType = ["all", "branch", "job_only"].includes(payload.targetType)
+    ? payload.targetType
+    : "job_only";
+
+  let targetBranches = [];
+  if (Array.isArray(payload.targetBranches)) {
+    targetBranches = payload.targetBranches;
+  } else if (typeof payload.targetBranches === "string") {
+    try {
+      const parsed = JSON.parse(payload.targetBranches);
+      if (Array.isArray(parsed)) targetBranches = parsed;
+      else targetBranches = payload.targetBranches.split(",").map((s) => s.trim());
+    } catch {
+      targetBranches = payload.targetBranches.split(",").map((s) => s.trim());
+    }
+  }
+  targetBranches = [
+    ...new Set(targetBranches.map(normalizeBranchCode).filter(Boolean)),
+  ];
+
   validateDesktopInstallerKind(platform, resolvedInstallerKind);
 
   const release = await UpdateRelease.create({
@@ -973,6 +1068,8 @@ async function createRelease(actor, payload = {}, artifactFile = null) {
     mandatory,
     isEnabled,
     platform,
+    targetType,
+    targetBranches,
     installerKind: resolvedInstallerKind,
     packageType,
     packageLayout,
@@ -1069,6 +1166,29 @@ async function updateRelease(actor, releaseId, payload = {}) {
   }
   if (payload.rolloutPercentage !== undefined) {
     patch.rolloutPercentage = clampNumber(payload.rolloutPercentage, 1, 100, 100);
+  }
+  if (
+    typeof payload.targetType === "string" &&
+    ["all", "branch", "job_only"].includes(payload.targetType)
+  ) {
+    patch.targetType = payload.targetType;
+  }
+  if (payload.targetBranches !== undefined) {
+    let branches = [];
+    if (Array.isArray(payload.targetBranches)) {
+      branches = payload.targetBranches;
+    } else if (typeof payload.targetBranches === "string") {
+      try {
+        const parsed = JSON.parse(payload.targetBranches);
+        if (Array.isArray(parsed)) branches = parsed;
+        else branches = payload.targetBranches.split(",").map((s) => s.trim());
+      } catch {
+        branches = payload.targetBranches.split(",").map((s) => s.trim());
+      }
+    }
+    patch.targetBranches = [
+      ...new Set(branches.map(normalizeBranchCode).filter(Boolean)),
+    ];
   }
 
   const release = await UpdateRelease.findByIdAndUpdate(
@@ -1291,15 +1411,28 @@ async function listBranchPeerDevices(actor, options = {}) {
   const heartbeatCutoff = new Date(Date.now() - BRANCH_PEER_ACTIVE_WINDOW_MS);
 
   const query = {
-    isActive: true,
-    platform: "desktop_windows",
-    branchCode,
-    lastHeartbeatAt: { $gte: heartbeatCutoff },
+    platform: {
+      $in: [
+        "desktop_windows",
+        "desktop",
+        "windows",
+        "desktop_electron",
+        "electron",
+      ],
+    },
     localIp: { $nin: [null, ""] },
   };
+
   if (targetUserId) {
+    // When looking up a specific peer user (e.g. direct chat ping / RDP),
+    // do NOT filter by branchCode! Cross-branch direct chats must resolve.
     query.lastKnownUserId = toObjectId(targetUserId, "userId");
+  } else {
+    query.branchCode = branchCode;
+    query.isActive = true;
+    query.lastHeartbeatAt = { $gte: heartbeatCutoff };
   }
+
   if (!includeSelf) {
     query.lastKnownUserId = {
       ...(query.lastKnownUserId ? { $eq: query.lastKnownUserId } : {}),
@@ -1307,9 +1440,20 @@ async function listBranchPeerDevices(actor, options = {}) {
     };
   }
 
-  const devices = await UpdateDevice.find(query)
+  let devices = await UpdateDevice.find(query)
     .sort({ lastHeartbeatAt: -1, updatedAt: -1 })
     .lean();
+
+  // If a specific targetUserId was requested and no active device was found,
+  // do a relaxed lookup without strict platform check to get any known device IP.
+  if (targetUserId && devices.length === 0) {
+    devices = await UpdateDevice.find({
+      lastKnownUserId: toObjectId(targetUserId, "userId"),
+      localIp: { $nin: [null, ""] },
+    })
+      .sort({ lastHeartbeatAt: -1, updatedAt: -1 })
+      .lean();
+  }
 
   const seen = new Set();
   const items = [];
@@ -1403,6 +1547,14 @@ async function cancelUpdateJob(actor, jobId) {
   }
 
   const now = new Date();
+  const tasksToCancel = await UpdateTask.find({
+    jobId: objectId,
+    status: { $in: ["pending", "acknowledged", "downloading", "installing"] },
+  })
+    .select("deviceId")
+    .lean();
+  const deviceIds = tasksToCancel.map((t) => t.deviceId).filter(Boolean);
+
   await UpdateTask.updateMany(
     {
       jobId: objectId,
@@ -1424,6 +1576,20 @@ async function cancelUpdateJob(actor, jobId) {
       },
     },
   );
+
+  if (deviceIds.length) {
+    await UpdateDevice.updateMany(
+      { _id: { $in: deviceIds } },
+      {
+        $set: {
+          "updateState.status": "idle",
+          "updateState.activeTaskId": null,
+          "updateState.message": "Job cancelled by admin.",
+          "updateState.updatedAt": now,
+        },
+      },
+    );
+  }
 
   await recalculateJobStats(objectId);
   const updated = await UpdateJob.findById(objectId).lean();
@@ -1604,10 +1770,21 @@ async function getReleaseDownloadInfo(releaseId) {
       "Release artifact file is not available on server.",
     );
   }
+  let checksumSha256 = release.checksumSha256 || null;
+  if (!checksumSha256) {
+    try {
+      checksumSha256 = await calculateSha256(artifactPath);
+      await UpdateRelease.updateOne(
+        { _id: release._id },
+        { $set: { checksumSha256 } },
+      ).catch(() => {});
+    } catch (_) {}
+  }
   return {
     mode: "file",
     filePath: artifactPath,
     fileName: release.fileName || path.basename(artifactPath),
+    checksumSha256,
   };
 }
 
@@ -1618,7 +1795,7 @@ async function validateReleaseDownloadAccess({
 }) {
   const resolvedReleaseId = String(releaseId || "");
   if (actor) {
-    return true;
+    return { valid: true, deviceUid: actor.deviceUid || null, taskId: null };
   }
 
   const payload = verifyReleaseDownloadToken(downloadToken);
@@ -1653,7 +1830,7 @@ async function validateReleaseDownloadAccess({
     throw new ApiError(403, "Task is not active for download.");
   }
 
-  return true;
+  return { valid: true, deviceUid, taskId };
 }
 
 async function pruneDisabledReleaseArtifact(actor, releaseId) {
@@ -1668,6 +1845,56 @@ async function pruneDisabledReleaseArtifact(actor, releaseId) {
     await fs.rm(artifactPath, { force: true });
   }
   await UpdateRelease.findByIdAndDelete(release._id);
+
+  const now = new Date();
+  // Cancel all tasks associated with this deleted release
+  await UpdateTask.updateMany(
+    {
+      $or: [{ releaseId: release._id }, { releaseVersion: release.version }],
+      status: { $in: ["pending", "acknowledged", "downloading", "installing"] },
+    },
+    {
+      $set: {
+        status: "cancelled",
+        completedAt: now,
+        message: "تم إلغاء التحديث لحذف الإصدار من السيرفر.",
+      },
+    },
+  );
+
+  // Cancel any running jobs for this release
+  await UpdateJob.updateMany(
+    {
+      $or: [{ releaseId: release._id }, { releaseVersion: release.version }],
+      status: { $in: ["pending", "running"] },
+    },
+    {
+      $set: {
+        status: "cancelled",
+        completedAt: now,
+      },
+    },
+  );
+
+  // Reset any devices whose updateState pointed to this release version
+  await UpdateDevice.updateMany(
+    {
+      $or: [
+        { "updateState.targetVersion": release.version },
+        { "updateState.status": { $in: ["pending", "acknowledged", "downloading", "installing"] } },
+      ],
+    },
+    {
+      $set: {
+        "updateState.status": "idle",
+        "updateState.progress": 0,
+        "updateState.lastError": null,
+        "updateState.currentTaskId": null,
+        "updateState.targetVersion": null,
+        "updateState.updatedAt": now,
+      },
+    },
+  );
 
   await logAuditEvent({
     actorId: actor.id,
@@ -1798,6 +2025,36 @@ function compareVersions(v1, v2) {
   return 0;
 }
 
+async function cancelAllActiveUpdates(actor) {
+  const now = new Date();
+  const tasksRes = await UpdateTask.updateMany(
+    { status: { $in: ["pending", "acknowledged", "downloading", "installing"] } },
+    { $set: { status: "cancelled", completedAt: now, message: "Cancelled by administrator." } }
+  );
+  const jobsRes = await UpdateJob.updateMany(
+    { status: { $in: ["pending", "running"] } },
+    { $set: { status: "cancelled", completedAt: now } }
+  );
+  const devicesRes = await UpdateDevice.updateMany(
+    { "updateState.status": { $in: ["pending", "acknowledged", "downloading", "installing"] } },
+    {
+      $set: {
+        "updateState.status": "idle",
+        "updateState.progress": 0,
+        "updateState.lastError": null,
+        "updateState.currentTaskId": null,
+        "updateState.targetVersion": null,
+        "updateState.updatedAt": now,
+      },
+    }
+  );
+  return {
+    tasksCancelled: tasksRes.modifiedCount,
+    jobsCancelled: jobsRes.modifiedCount,
+    devicesReset: devicesRes.modifiedCount,
+  };
+}
+
 module.exports = {
   registerDeviceHeartbeat,
   listDevices,
@@ -1810,6 +2067,7 @@ module.exports = {
   listUpdateJobs,
   getUpdateJobDetails,
   cancelUpdateJob,
+  cancelAllActiveUpdates,
   reportTaskProgress,
   getReleaseDownloadInfo,
   validateReleaseDownloadAccess,

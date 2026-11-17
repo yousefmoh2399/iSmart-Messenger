@@ -7,13 +7,26 @@ class ChatTextFieldPasteMenu extends StatelessWidget {
     required this.controller,
     required this.enabled,
     required this.child,
+    this.onPasteFromClipboard,
   });
 
   final TextEditingController controller;
   final bool enabled;
   final Widget child;
 
+  /// Optional callback that checks if the clipboard contains copied files or
+  /// images and handles them. If it returns `true`, the paste was handled as a
+  /// file/media attachment and plain-text insertion is skipped.
+  final Future<bool> Function()? onPasteFromClipboard;
+
   Future<void> _pasteAtSelection() async {
+    if (onPasteFromClipboard != null) {
+      final handledAsFile = await onPasteFromClipboard!();
+      if (handledAsFile) {
+        return;
+      }
+    }
+
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
     if (text == null || text.isEmpty) {

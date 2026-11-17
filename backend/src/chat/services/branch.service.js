@@ -1,4 +1,4 @@
-const Branch = require("../models/branch.model");
+﻿const Branch = require("../models/branch.model");
 const User = require("../../models/user.model");
 const ApiError = require("../../utils/api-error");
 const { userHasPermission } = require("./role.service");
@@ -26,18 +26,39 @@ function serializeBranch(branch, membersCount = branch.membersCount || 0) {
   };
 }
 
+const BRANCH_CACHE_TTL_MS = 15000;
+let _branchesCache = null;
+let _branchesCacheExpiresAt = 0;
+
+function invalidateBranchesCache() {
+  _branchesCache = null;
+  _branchesCacheExpiresAt = 0;
+}
+
 async function listBranches() {
-  const branches = await Branch.find({ deletedAt: null })
-    .sort({ name: 1 })
-    .lean();
-  const counts = await Promise.all(
-    branches.map((branch) => User.countDocuments({ branchId: branch._id })),
+  if (_branchesCache && Date.now() < _branchesCacheExpiresAt) {
+    return _branchesCache;
+  }
+  const [branches, aggregatedCounts] = await Promise.all([
+    Branch.find({ deletedAt: null }).sort({ name: 1 }).lean(),
+    User.aggregate([
+      { $match: { branchId: { $ne: null } } },
+      { $group: { _id: "$branchId", count: { $sum: 1 } } },
+    ]),
+  ]);
+  const countMap = new Map(
+    aggregatedCounts.map((row) => [String(row._id), row.count]),
   );
-  return branches.map((branch, index) => serializeBranch(branch, counts[index]));
+  const serialized = branches.map((branch) =>
+    serializeBranch(branch, countMap.get(branch._id.toString()) || 0),
+  );
+  _branchesCache = serialized;
+  _branchesCacheExpiresAt = Date.now() + BRANCH_CACHE_TTL_MS;
+  return serialized;
 }
 
 async function createBranch(actor, payload) {
-  const allowed = await userHasPermission(actor, "canCreateDepartments");
+  const allowed = await userHasPermission(actor, "canManageBranches");
   if (!allowed) {
     throw new ApiError(403, "Permission denied.");
   }
@@ -72,11 +93,12 @@ async function createBranch(actor, payload) {
     throw error;
   }
 
+  invalidateBranchesCache();
   return serializeBranch(branch);
 }
 
 async function updateBranch(actor, branchId, payload) {
-  const allowed = await userHasPermission(actor, "canCreateDepartments");
+  const allowed = await userHasPermission(actor, "canManageBranches");
   if (!allowed) {
     throw new ApiError(403, "Permission denied.");
   }
@@ -115,11 +137,12 @@ async function updateBranch(actor, branchId, payload) {
     }
     throw error;
   }
+  invalidateBranchesCache();
   return serializeBranch(branch);
 }
 
 async function deleteBranch(actor, branchId) {
-  const allowed = await userHasPermission(actor, "canCreateDepartments");
+  const allowed = await userHasPermission(actor, "canManageBranches");
   if (!allowed) {
     throw new ApiError(403, "Permission denied.");
   }
@@ -133,6 +156,7 @@ async function deleteBranch(actor, branchId) {
   await User.updateMany({ branchId: branch._id }, { $set: { branchId: null } });
 
   await Branch.deleteOne({ _id: branchId });
+  invalidateBranchesCache();
 }
 
 module.exports = {
@@ -141,4 +165,5 @@ module.exports = {
   updateBranch,
   deleteBranch,
   serializeBranch,
+  invalidateBranchesCache,
 };

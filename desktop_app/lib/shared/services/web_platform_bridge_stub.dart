@@ -9,7 +9,14 @@ Future<String?> downloadBytes({
   required String fileName,
   String? mimeType,
   String? preferredDirectoryPath,
+  String? targetFilePath,
 }) async {
+  if (targetFilePath != null && targetFilePath.trim().isNotEmpty) {
+    final targetFile = File(targetFilePath.trim());
+    await targetFile.parent.create(recursive: true);
+    await targetFile.writeAsBytes(bytes, flush: true);
+    return targetFile.path;
+  }
   final targetFile = await _resolveDownloadFile(
     fileName,
     preferredDirectoryPath: preferredDirectoryPath,
@@ -42,16 +49,23 @@ Future<void> archiveElectronChatAttachment({
   required String messageId,
   required String sha256Hex,
   required String fileName,
-  required Uint8List bytes,
+  Uint8List? bytes,
+  String? sourcePath,
   String? preferredDirectoryPath,
 }) async {}
 
-Future<void> cacheElectronChatAttachment({
+Future<String?> getElectronCachedAttachmentPath({
+  required String messageId,
+  required String fileName,
+  String? preferredDirectoryPath,
+}) async => null;
+
+Future<String?> cacheElectronChatAttachment({
   required String messageId,
   required String fileName,
   required Uint8List bytes,
   String? preferredDirectoryPath,
-}) async {}
+}) async => null;
 
 Future<Uint8List?> readElectronCachedChatAttachment({
   required String messageId,
@@ -77,6 +91,8 @@ Future<void> electronDebugLog(
   Map<String, Object?>? details,
 ]) async {}
 
+Future<void> setTaskbarBadgeCount(int count) async {}
+
 void setElectronTrayActionHandler(void Function(String action)? handler) {}
 
 Future<Map<String, dynamic>> getElectronDeviceInfo() async {
@@ -92,6 +108,26 @@ Future<Map<String, dynamic>?> getElectronWindowState() async {
 }
 
 Future<bool> setElectronWindowTheme(String mode) async => false;
+
+Stream<dynamic>? get onWindowOnline => null;
+
+Future<List<Map<String, dynamic>>?> pickElectronFiles({
+  bool allowMultiple = true,
+  bool isImageOnly = false,
+  String? title,
+}) async => null;
+
+Future<bool> cancelElectronDownload(String transferId) async => false;
+
+Future<bool> copyElectronFile({
+  required String sourcePath,
+  required String destinationPath,
+}) async => false;
+
+Future<String?> pickElectronSavePath({
+  required String defaultFileName,
+  String? title,
+}) async => null;
 
 Future<String?> pickElectronDirectory({
   String? title,
@@ -159,6 +195,8 @@ Future<void> showBrowserNotification({
 bool isPageVisible() => false;
 
 Future<bool> isElectronWindowForegroundVisible() async => false;
+
+void showBrowserAttention(String title) {}
 
 void clearBrowserAttention() {}
 
@@ -254,12 +292,21 @@ Future<Map<String, dynamic>> startElectronUpdate({
   required String downloadUrl,
   String? token,
   String? checksumSha256,
+  String? fileName,
+  String? silentInstallArgs,
+  String? installerKind,
+  String? branchCode,
+  String? deviceUid,
 }) async {
   throw UnsupportedError('Electron is not available on this platform.');
 }
 
-Future<Map<String, dynamic>> applyElectronUpdate() async {
+Future<Map<String, dynamic>> applyElectronUpdate([Map<String, dynamic>? options]) async {
   throw UnsupportedError('Electron is not available on this platform.');
+}
+
+Future<Map<String, dynamic>> getPreparedElectronUpdate([Map<String, dynamic>? options]) async {
+  return const <String, dynamic>{'prepared': false};
 }
 
 Future<File> _resolveDownloadFile(
@@ -316,3 +363,49 @@ Future<String?> electronCaptureWindow(int windowId) async => null;
 Future<String?> electronCaptureScreen() async => null;
 
 Future<bool> electronOpenRdp(String ip) async => false;
+
+Future<bool> electronOpenPing(String ip) async => false;
+
+Future<Map<String, dynamic>> electronProbePeerStatus(String ip) async =>
+    const <String, dynamic>{
+      'success': false,
+      'message': 'Not supported on this platform.',
+    };
+
+Future<Map<String, dynamic>> electronGetStorageBreakdown({String? directoryPath}) async =>
+    const <String, dynamic>{'success': false};
+
+Future<bool> electronClearStorageCache({required String category, String? directoryPath}) async =>
+    false;
+
+Future<Map<String, dynamic>> electronReadClipboardFiles() async =>
+    const <String, dynamic>{
+      'success': false,
+      'hasFiles': false,
+      'files': <Map<String, dynamic>>[],
+    };
+Future<Map<String, dynamic>> uploadElectronChatAttachment({
+  required String url,
+  required String filePath,
+  String? token,
+  required String conversationId,
+  String? content,
+  String? replyToMessageId,
+  String? fileName,
+  Map<String, dynamic>? metadata,
+  String? transferId,
+  void Function(int sent, int total)? onProgress,
+}) async => const <String, dynamic>{'success': false, 'error': 'Not supported'};
+
+Future<Map<String, dynamic>> cancelElectronUpload(String transferId) async =>
+    const <String, dynamic>{'success': false, 'error': 'Not supported'};
+
+Future<Map<String, dynamic>> downloadElectronChatAttachment({
+  required String url,
+  required String destinationPath,
+  String? token,
+  String? transferId,
+  void Function(int received, int total)? onProgress,
+}) async => const <String, dynamic>{'success': false, 'error': 'Not supported'};
+
+Future<String> calculateElectronFileSha256(String filePath) async => '';

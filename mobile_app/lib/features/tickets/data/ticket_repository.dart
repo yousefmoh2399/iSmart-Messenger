@@ -160,11 +160,16 @@ class TicketRepository {
   }
 
   Future<TicketSettingsData> updateSupportAgents(
-    List<String> supportAgentIds,
-  ) async {
+    List<String> supportAgentIds, {
+    Map<String, List<String>>? exportPermissionsByUserId,
+  }) async {
     final response = await _apiClient.dio.put<Map<String, dynamic>>(
       '/api/tickets/settings',
-      data: {'supportAgentIds': supportAgentIds},
+      data: {
+        'supportAgentIds': supportAgentIds,
+        if (exportPermissionsByUserId != null)
+          'exportPermissionsByUserId': exportPermissionsByUserId,
+      },
     );
     return TicketSettingsData.fromJson(
       response.data?['settings'] as Map<String, dynamic>?,

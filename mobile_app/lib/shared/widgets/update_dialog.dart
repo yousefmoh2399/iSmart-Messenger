@@ -5,7 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:path_provider/path_provider.dart';
+import '../../../core/utils/app_path_utils.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 
@@ -278,7 +278,7 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
       }
 
       // Get app cache directory for storing APK
-      final cacheDir = await getTemporaryDirectory();
+      final cacheDir = await AppPathUtils.getSafeTemporaryDirectory();
       final fileName = release.fileName ?? 'update.apk';
       final filePath = '${cacheDir.path}/$fileName';
       final file = File(filePath);

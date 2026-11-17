@@ -93,12 +93,38 @@ if (-not (Test-Path -LiteralPath `$sourceDir)) {
 Get-Process -Name `$processName -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 1200
 
+# Remove legacy shared shortcuts
+`$publicDesktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::CommonDesktopDirectory)
+`$commonPrograms = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::CommonPrograms)
+if (`$publicDesktop) {
+  Remove-Item (Join-Path `$publicDesktop ("{0}.lnk" -f `$appName)) -Force -ErrorAction SilentlyContinue
+}
+if (`$commonPrograms) {
+  Remove-Item (Join-Path `$commonPrograms ("{0}.lnk" -f `$appName)) -Force -ErrorAction SilentlyContinue
+  Remove-Item (Join-Path `$commonPrograms `$appName) -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 New-Item -ItemType Directory -Force -Path `$installDir | Out-Null
 New-Item -ItemType Directory -Force -Path `$startMenuDir | Out-Null
 
 robocopy `$sourceDir `$installDir /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
 if (`$LASTEXITCODE -gt 7) {
   throw ("Copy failed with exit code {0}" -f `$LASTEXITCODE)
+}
+
+`$fontDest = Join-Path `$env:SystemRoot 'Fonts\seguiemj.ttf'
+`$fontSrc = Join-Path `$installDir 'resources\build\seguiemj.ttf'
+if (-not (Test-Path `$fontSrc)) {
+  `$fontSrc = Join-Path `$installDir 'web\assets\assets\fonts\seguiemj.ttf'
+}
+if (-not (Test-Path `$fontSrc)) {
+  `$fontSrc = Join-Path `$installDir 'data\flutter_assets\assets\fonts\seguiemj.ttf'
+}
+if ((Test-Path `$fontSrc) -and (-not (Test-Path `$fontDest))) {
+  try {
+    Copy-Item -LiteralPath `$fontSrc -Destination `$fontDest -Force -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts' -Name 'Segoe UI Emoji (TrueType)' -Value 'seguiemj.ttf' -ErrorAction SilentlyContinue
+  } catch {}
 }
 
 New-Shortcut -ShortcutPath `$startMenuShortcut -TargetPath `$targetExe -WorkingDirectory `$installDir

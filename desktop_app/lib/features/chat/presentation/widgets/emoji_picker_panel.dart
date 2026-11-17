@@ -8,9 +8,23 @@ class EmojiPickerPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final emojiStyle = TextStyle(
+      fontSize: 26,
+      color: Theme.of(context).colorScheme.onSurface,
+      fontFamily: 'Segoe UI Emoji',
+      fontFamilyFallback: const [
+        'Segoe UI Emoji',
+        'Apple Color Emoji',
+        'Noto Color Emoji',
+        'Segoe UI Symbol',
+      ],
+    );
+
     return EmojiPicker(
       onEmojiSelected: (category, emoji) => onEmojiSelected(emoji),
       config: Config(
+        checkPlatformCompatibility: false,
+        emojiTextStyle: emojiStyle,
         emojiViewConfig: EmojiViewConfig(
           emojiSizeMax: 28,
           backgroundColor: Theme.of(context).colorScheme.surface,

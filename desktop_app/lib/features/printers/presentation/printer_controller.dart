@@ -122,6 +122,8 @@ class PrinterController extends AsyncNotifier<PrinterOverviewData> {
     int? fromYear,
     int? toMonth,
     int? toYear,
+    String? templateId,
+    int? sheetsPerClient,
   }) {
     if (!_canViewPrinters()) return Future<void>.value();
     return _repository.exportReport(
@@ -132,6 +134,8 @@ class PrinterController extends AsyncNotifier<PrinterOverviewData> {
       fromYear: fromYear,
       toMonth: toMonth,
       toYear: toYear,
+      templateId: templateId,
+      sheetsPerClient: sheetsPerClient,
     );
   }
 
@@ -143,6 +147,8 @@ class PrinterController extends AsyncNotifier<PrinterOverviewData> {
     int? fromYear,
     int? toMonth,
     int? toYear,
+    String? templateId,
+    int? sheetsPerClient,
   }) {
     if (!_canViewPrinters()) return Future<void>.value();
     return _repository.exportReport(
@@ -153,6 +159,8 @@ class PrinterController extends AsyncNotifier<PrinterOverviewData> {
       fromYear: fromYear,
       toMonth: toMonth,
       toYear: toYear,
+      templateId: templateId,
+      sheetsPerClient: sheetsPerClient,
     );
   }
 }

@@ -324,7 +324,10 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               FilledButton.icon(
                 onPressed: _creating ? null : _createBackup,
@@ -337,7 +340,6 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
                     : const Icon(Iconsax.document_upload5),
                 label: Text(_creating ? 'Creating backup...' : 'Create Backup'),
               ),
-              const SizedBox(width: 10),
               OutlinedButton.icon(
                 onPressed: _restoringUpload ? null : _restoreBackupFromFile,
                 icon: _restoringUpload
@@ -351,7 +353,6 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
                   _restoringUpload ? 'Restoring...' : 'Restore from File',
                 ),
               ),
-              const SizedBox(width: 10),
               OutlinedButton.icon(
                 onPressed: _refresh,
                 icon: const Icon(Iconsax.refresh),

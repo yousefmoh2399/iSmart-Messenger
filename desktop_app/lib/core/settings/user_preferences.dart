@@ -45,6 +45,44 @@ class NotificationTone {
   }
 }
 
+
+enum NotificationDisplayMode {
+  all(
+    id: 'all',
+    label: 'إظهار الإشعار كاملاً',
+    description: 'صوت التنبيه مع ظهور اسم الراسل ومحتوى الرسالة على جانب الشاشة.',
+  ),
+  hideDetails(
+    id: 'hide_details',
+    label: 'إخفاء تفاصيل الرسالة',
+    description: 'صوت التنبيه مع إشعار مختصر (رسالة جديدة) بدون الاسم أو النص.',
+  ),
+  soundOnly(
+    id: 'sound_only',
+    label: 'صوت التنبيه فقط (بدون ظهور في الجنب)',
+    description: 'تشغيل صوت التنبيه فقط دون ظهور أي رسائل منبثقة على جانب الشاشة.',
+  );
+
+  const NotificationDisplayMode({
+    required this.id,
+    required this.label,
+    required this.description,
+  });
+
+  final String id;
+  final String label;
+  final String description;
+
+  static const defaultMode = NotificationDisplayMode.all;
+
+  static NotificationDisplayMode fromId(String? id) {
+    for (final mode in values) {
+      if (mode.id == id) return mode;
+    }
+    return defaultMode;
+  }
+}
+
 class UserPreferences {
   const UserPreferences({
     required this.enterSendsMessage,
@@ -53,6 +91,7 @@ class UserPreferences {
     required this.localStorageDirectoryPath,
     required this.preferredPrinterName,
     required this.notificationToneId,
+    this.notificationDisplayModeId = 'all',
   });
 
   factory UserPreferences.defaults() {
@@ -63,6 +102,7 @@ class UserPreferences {
       localStorageDirectoryPath: null,
       preferredPrinterName: null,
       notificationToneId: 'default',
+      notificationDisplayModeId: 'all',
     );
   }
 
@@ -72,6 +112,10 @@ class UserPreferences {
   final String? localStorageDirectoryPath;
   final String? preferredPrinterName;
   final String notificationToneId;
+  final String notificationDisplayModeId;
+
+  NotificationDisplayMode get notificationDisplayMode =>
+      NotificationDisplayMode.fromId(notificationDisplayModeId);
 
   NotificationTone get notificationTone =>
       NotificationTone.fromId(notificationToneId);
@@ -86,6 +130,7 @@ class UserPreferences {
     String? preferredPrinterName,
     bool clearPreferredPrinterName = false,
     String? notificationToneId,
+    String? notificationDisplayModeId,
   }) {
     return UserPreferences(
       enterSendsMessage: enterSendsMessage ?? this.enterSendsMessage,
@@ -100,6 +145,8 @@ class UserPreferences {
           ? null
           : (preferredPrinterName ?? this.preferredPrinterName),
       notificationToneId: notificationToneId ?? this.notificationToneId,
+      notificationDisplayModeId:
+          notificationDisplayModeId ?? this.notificationDisplayModeId,
     );
   }
 }

@@ -1,3 +1,9 @@
+// Expand libuv threadpool before any crypto/fs/bcrypt work runs so morning bcrypt logins
+// do not starve file/avatar disk reads and HTTP serving.
+if (!process.env.UV_THREADPOOL_SIZE) {
+  process.env.UV_THREADPOOL_SIZE = "16";
+}
+
 const { TextEncoder, TextDecoder } = require("text-encoding");
 const util = require("util");
 global.TextEncoder = TextEncoder;
@@ -48,6 +54,7 @@ const { closeRedisClient }           = require("./config/redis");
 const logger                         = require("./utils/logger");
 const mongoose                       = require("mongoose");
 const { ensureBootstrapAdmins }      = require("./services/bootstrap-admin.service");
+const { sanitizeBroadcastConversations } = require("./chat/services/chat.service");
 const {
   startPrinterScheduler,
   stopPrinterScheduler,
@@ -62,15 +69,17 @@ async function startServer() {
   await ensureDefaultRoles();
   await ensureDirectoryIndexes();
   await ensureBootstrapAdmins();
+  await sanitizeBroadcastConversations();
 
   const server = http.createServer(app);
   serverRef = server;
 
-  // Allow large file downloads to complete without connection being closed.
-  // Node's default keepAliveTimeout is 5s which causes "Connection closed while
-  // receiving data" errors on slow or large downloads behind reverse proxies.
-  server.keepAliveTimeout = 120_000; // 2 minutes
-  server.headersTimeout   = 125_000; // must be > keepAliveTimeout
+  // Allow large file uploads/downloads over slow branch VPNs to complete without being closed.
+  // Set keepAliveTimeout and requestTimeout generously so slow uploads never hang up.
+  server.keepAliveTimeout = 300_000; // 5 minutes
+  server.headersTimeout   = 305_000; // must be > keepAliveTimeout
+  server.requestTimeout   = 1800_000; // 30 minutes for slow network uploads
+  server.timeout          = 1800_000;
 
   const io = initializeChatSocketServer(server);
   app.set("io", io);
@@ -78,6 +87,9 @@ async function startServer() {
 
   const { startMessageScheduler } = require("./services/scheduler.service");
   startMessageScheduler(io);
+
+  const { startBackupScheduler, stopBackupScheduler } = require("./admin/backup/backup-scheduler.service");
+  startBackupScheduler();
 
   await new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -92,6 +104,10 @@ async function startServer() {
 async function shutdown(signal) {
   logger.info("server.shutdown.start", { signal });
   try { stopPrinterScheduler(); } catch (_) {}
+  try {
+    const { stopBackupScheduler } = require("./admin/backup/backup-scheduler.service");
+    stopBackupScheduler();
+  } catch (_) {}
   try {
     if (serverRef) {
       await new Promise((resolve) => serverRef.close(() => resolve()));

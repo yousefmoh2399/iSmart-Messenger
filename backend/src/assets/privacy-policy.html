@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>سياسة الخصوصية • iSmart Messenger Privacy Policy</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #0A84FF;
+            --primary-dark: #0066CC;
+            --bg-color: #F8F9FA;
+            --card-bg: #FFFFFF;
+            --text-main: #1D1D1F;
+            --text-sub: #6E6E73;
+            --border-color: #E5E5EA;
+            --badge-bg: #E8F2FF;
+            --badge-text: #0A84FF;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #0D1117;
+                --card-bg: #161B22;
+                --text-main: #F0F6FC;
+                --text-sub: #8B949E;
+                --border-color: #30363D;
+                --badge-bg: #1C2D42;
+                --badge-text: #58A6FF;
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Cairo', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            line-height: 1.7;
+            padding: 24px 16px;
+        }
+
+        .container {
+            max-width: 860px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 20px 0;
+        }
+
+        .logo-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--badge-bg);
+            color: var(--badge-text);
+            padding: 6px 16px;
+            border-radius: 999px;
+            font-size: 14px;
+            font-weight: 700;
+            margin-bottom: 16px;
+        }
+
+        h1 {
+            font-size: 32px;
+            font-weight: 800;
+            margin-bottom: 8px;
+            letter-spacing: -0.5px;
+        }
+
+        .subtitle {
+            color: var(--text-sub);
+            font-size: 15px;
+        }
+
+        .lang-switch {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .lang-btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 6px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .lang-btn.active {
+            background: var(--primary);
+            color: #FFFFFF;
+            border-color: var(--primary);
+        }
+
+        .section-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 28px;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+        }
+
+        h2 {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        p, ul {
+            font-size: 15px;
+            color: var(--text-main);
+            margin-bottom: 12px;
+        }
+
+        ul {
+            padding-right: 20px;
+            padding-left: 20px;
+        }
+
+        li {
+            margin-bottom: 8px;
+        }
+
+        .highlight-box {
+            background: var(--badge-bg);
+            border-right: 4px solid var(--primary);
+            padding: 14px 18px;
+            border-radius: 8px;
+            margin: 16px 0;
+            font-size: 14px;
+        }
+
+        [dir="ltr"] .highlight-box {
+            border-right: none;
+            border-left: 4px solid var(--primary);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+            font-size: 14px;
+        }
+
+        th, td {
+            padding: 12px 14px;
+            text-align: right;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        [dir="ltr"] th, [dir="ltr"] td {
+            text-align: left;
+        }
+
+        th {
+            background: var(--bg-color);
+            color: var(--text-sub);
+            font-weight: 700;
+        }
+
+        footer {
+            text-align: center;
+            padding: 30px 0;
+            color: var(--text-sub);
+            font-size: 13px;
+            border-top: 1px solid var(--border-color);
+            margin-top: 40px;
+        }
+
+        .contact-pill {
+            display: inline-block;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            padding: 8px 16px;
+            border-radius: 999px;
+            margin-top: 10px;
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo-badge">🛡️ iSmart Messenger • Enterprise Security</div>
+            <h1 id="page-title">سياسة الخصوصية وأمان البيانات</h1>
+            <p class="subtitle" id="last-updated">آخر تحديث: 12 أكتوبر 2026 • متوافق مع معايير Google Play و Apple App Store</p>
+            <div class="lang-switch">
+                <button class="lang-btn active" onclick="setLang('ar')">العربية</button>
+                <button class="lang-btn" onclick="setLang('en')">English</button>
+            </div>
+        </header>
+
+        <!-- المحتوى العربي -->
+        <main id="content-ar">
+            <div class="section-card">
+                <h2>1. نظرة عامة</h2>
+                <p>تطبيق <strong>iSmart Messenger</strong> هو حل مؤسسي مخصص لبيئات العمل والشركات، يجمع بين المراسلة الفورية، ومسح المستندات ضوئيًا وتحويلها إلى PDF، وجرد وإدارة أصول تكنولوجيا المعلومات، ونقل الملفات والطباعة الداخلية. خصوصية وأمان بياناتك هي أولويتنا القصوى.</p>
+            </div>
+
+            <div class="section-card">
+                <h2>2. البيانات التي يتم التعامل معها</h2>
+                <ul>
+                    <li><strong>الكاميرا:</strong> تُستخدم حصريًا لمسح المستندات الورقية وتطبيق خوارزميات OpenCV لتحسين الصورة وقراءة الباركود وQR للأصول. لا يتم فتح الكاميرا في الخلفية مطلقًا.</li>
+                    <li><strong>الميكروفون:</strong> يُستخدم فقط عند تسجيل المستخدم لرسائل صوتية داخل الدردشة الداخلية بضغطه على زر التسجيل.</li>
+                    <li><strong>الصور والمستندات:</strong> للوصول إلى الصور والمستندات التي يحددها المستخدم فقط لرفعها كمرفقات أو حفظ ملفات PDF الممسوحة محليًا.</li>
+                    <li><strong>بيانات الحساب:</strong> اسم المستخدم، الاسم الكامل، الصورة الشخصية، ودور المستخدم الوظيفي بهدف مصادقة تسجيل الدخول وعرض الهوية للزملاء.</li>
+                    <li><strong>عنوان الخادم:</strong> رابط API الذي يدخله المستخدم للاتصال بخادم شركته أو الخادم الافتراضي.</li>
+                </ul>
+                <div class="highlight-box">
+                    <strong>تعهد واضح:</strong> نحن لا نبيع، ولا نؤجر، ولا نشارك أي بيانات شخصية أو مستندات أو سجلات محادثات مع أي شركات إعلانية أو جهات تسويقية خارجية. التطبيق خالٍ تمامًا من أي إعلانات تجارية.
+                </div>
+            </div>
+
+            <div class="section-card">
+                <h2>3. الأذونات المطلوبة وسببها</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>الصلاحية</th>
+                            <th>الغرض الأساسي</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>الكاميرا (Camera)</strong></td>
+                            <td>مسح المستندات الورقية ضوئيًا وقراءة أكواد QR والباركود.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>الميكروفون (Microphone)</strong></td>
+                            <td>تسجيل الرسائل الصوتية داخل المحادثة بناءً على طلبك.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>الصور والوسائط (Media Library)</strong></td>
+                            <td>اختيار الصور والمستندات لإرسالها أو استيرادها للمسح.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>الإشعارات (Notifications)</strong></td>
+                            <td>تنبيهك بوصول رسائل عمل جديدة أو تحديثات على المهام.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>الإنترنت وحالة الشبكة</strong></td>
+                            <td>الاتصال الآمن بخادم النظام ومزامنة الرسائل والملفات.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="section-card">
+                <h2>4. تخزين البيانات وحمايتها</h2>
+                <p>يتم تخزين رموز المصادقة والبيانات الحساسة محليًا على جهازك باستخدام بيئات التخزين الآمنة المشفرة (Secure Storage / Keystore / Keychain). يتم نقل جميع البيانات عبر تشفير TLS/HTTPS و WebSockets الآمنة.</p>
+            </div>
+
+            <div class="section-card">
+                <h2>5. حذف الحساب وإزالة البيانات</h2>
+                <p>يتم إدارة الحسابات في التطبيق مركزيًا بواسطة مسؤولي النظام (IT Administrators) داخل مؤسستك. يحق لأي مستخدم في أي وقت طلب حذف حسابه وكافة بياناته الشخصية ومرفقاته وسجلات محادثاته. يمكن طلب الحذف عبر التواصل مع مسؤول النظام الداخلي أو مراسلتنا مباشرة على البريد الإلكتروني أدناه، ويتم حذف البيانات نهائيًا خلال 30 يومًا من تاريخ الطلب.</p>
+            </div>
+
+            <div class="section-card">
+                <h2>6. خصوصية الأطفال</h2>
+                <p>التطبيق مخصص وموجه حصريًا لبيئات الأعمال والموظفين البالغين (18 عامًا فأكثر)، ولا يجمع أي معلومات عن الأطفال تحت سن 13 عامًا.</p>
+            </div>
+        </main>
+
+        <!-- English Content -->
+        <main id="content-en" style="display: none;" dir="ltr">
+            <div class="section-card">
+                <h2>1. Overview</h2>
+                <p><strong>iSmart Messenger</strong> is an enterprise workplace communication and productivity application combining instant team messaging, OpenCV-powered document scanning and PDF generation, IT asset tracking, and workplace file relays. Your privacy and data security are our top priorities.</p>
+            </div>
+
+            <div class="section-card">
+                <h2>2. Data We Process & Purpose</h2>
+                <ul>
+                    <li><strong>Camera:</strong> Used strictly for scanning paper documents, auto-detecting boundaries with native OpenCV image processing, and scanning QR/barcodes for asset management. No background camera access occurs.</li>
+                    <li><strong>Microphone:</strong> Accessed solely when recording voice notes inside workplace chat upon user action.</li>
+                    <li><strong>Photos & Media Files:</strong> Accessed only to allow users to select images/documents as attachments or save scanned PDF outputs locally.</li>
+                    <li><strong>Account Credentials:</strong> Username, full name, profile photo, and role to authenticate users and identify colleagues within the workplace directory.</li>
+                    <li><strong>Server Address:</strong> Configurable backend API URL provided to connect to the organization's dedicated backend.</li>
+                </ul>
+                <div class="highlight-box">
+                    <strong>Zero Tracking & Advertising:</strong> We never sell, lease, or monetize personal information, chat transcripts, or documents. The application is 100% ad-free and tracker-free.
+                </div>
+            </div>
+
+            <div class="section-card">
+                <h2>3. Permissions Breakdown</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Permission</th>
+                            <th>Purpose</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Camera</strong></td>
+                            <td>Document boundary scanning, image enhancements, and QR/barcode decoding.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Microphone</strong></td>
+                            <td>Recording chat voice messages on demand.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Photos & Storage</strong></td>
+                            <td>Attaching workplace files and saving generated PDFs to device storage.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Notifications</strong></td>
+                            <td>Alerting users about new messages and task assignments via Firebase Cloud Messaging.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Network & Internet</strong></td>
+                            <td>Establishing encrypted connections (TLS/HTTPS & WSS) with the backend API.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="section-card">
+                <h2>4. Data Storage & Security</h2>
+                <p>Authentication tokens are securely stored locally via encrypted hardware-backed storage (Android Keystore / iOS Keychain). All communication in transit is encrypted using HTTPS/TLS protocols.</p>
+            </div>
+
+            <div class="section-card">
+                <h2>5. Account & Data Deletion</h2>
+                <p>Because accounts are provisioned by enterprise administrators, you may request the full deletion of your profile, messages, and uploaded files at any time by contacting your organization's IT administrator or sending an email request to our support address below. Data is purged within 30 days of confirmation.</p>
+            </div>
+
+            <div class="section-card">
+                <h2>6. Children's Privacy</h2>
+                <p>This service is strictly intended for adult workplace employees (18+) and does not knowingly collect information from children under 13.</p>
+            </div>
+        </main>
+
+        <footer>
+            <p><strong>iSmart Messenger</strong> • Developed by Yousef Mohamed</p>
+            <p>للتواصل والاستفسارات / Support Contact:</p>
+            <a href="mailto:support@ismart.com" class="contact-pill">support@ismart.com</a>
+        </footer>
+    </div>
+
+    <script>
+        function setLang(lang) {
+            const arContent = document.getElementById('content-ar');
+            const enContent = document.getElementById('content-en');
+            const buttons = document.querySelectorAll('.lang-btn');
+            const title = document.getElementById('page-title');
+            const updated = document.getElementById('last-updated');
+
+            if (lang === 'ar') {
+                arContent.style.display = 'block';
+                enContent.style.display = 'none';
+                document.documentElement.dir = 'rtl';
+                document.documentElement.lang = 'ar';
+                title.textContent = 'سياسة الخصوصية وأمان البيانات';
+                updated.textContent = 'آخر تحديث: 12 أكتوبر 2026 • متوافق مع معايير Google Play و Apple App Store';
+                buttons[0].classList.add('active');
+                buttons[1].classList.remove('active');
+            } else {
+                arContent.style.display = 'none';
+                enContent.style.display = 'block';
+                document.documentElement.dir = 'ltr';
+                document.documentElement.lang = 'en';
+                title.textContent = 'Privacy Policy & Data Security';
+                updated.textContent = 'Last Updated: October 12, 2026 • Compliant with Google Play & Apple App Store Guidelines';
+                buttons[0].classList.remove('active');
+                buttons[1].classList.add('active');
+            }
+        }
+    </script>
+</body>
+</html>

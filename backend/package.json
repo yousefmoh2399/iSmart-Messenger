@@ -48,6 +48,7 @@
   "pkg": {
     "assets": [
       "src/assets/**/*",
+      "ismart-messenger-firebase-adminsdk-*.json",
       "node_modules/pdfkit/js/data/**/*"
     ],
     "targets": [

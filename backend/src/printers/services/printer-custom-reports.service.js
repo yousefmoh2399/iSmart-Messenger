@@ -59,7 +59,9 @@ async function buildCustomPdfReport(data, reportName, month, year, type) {
     doc.text(line3, 0, 90, { width: 841, align: "center" });
 
     const entityName = type === "global" ? "الفروع" : (data[0]?.branchName || "الفرع");
-    let titleText = `استهلاك  ${entityName}  للورق عن شهر ${month || ""} ${year || ""}`;
+    let titleText = typeof month === "string" && (month.includes("شهر") || month.includes("فترة"))
+      ? `استهلاك  ${entityName}  للورق ${month}`
+      : `استهلاك  ${entityName}  للورق عن شهر ${month || ""} ${year || ""}`;
     doc.fontSize(16).text(processArabicText(titleText), 0, 140, { width: 841, align: "center" });
 
     doc.moveDown(2);
@@ -187,7 +189,9 @@ async function buildCustomExcelReport(data, reportName, month, year, type) {
   line3Cell.alignment = { horizontal: 'center', vertical: 'middle' };
 
   const entityName = type === "global" ? "الفروع" : (data[0]?.branchName || "الفرع");
-  let titleText = `استهلاك  ${entityName}  للورق عن شهر ${month || ""} ${year || ""}`;
+  let titleText = typeof month === "string" && (month.includes("شهر") || month.includes("فترة"))
+    ? `استهلاك  ${entityName}  للورق ${month}`
+    : `استهلاك  ${entityName}  للورق عن شهر ${month || ""} ${year || ""}`;
   
   const titleCell = sheet.getCell('C5');
   titleCell.value = titleText;
@@ -251,30 +255,116 @@ async function buildCustomExcelReport(data, reportName, month, year, type) {
   return workbook.xlsx.writeBuffer();
 }
 
-async function exportCustomReport(actor, { type = "global", format = "pdf", branchId = null, month = null, year = null }) {
+async function exportCustomReport(actor, {
+  type = "global",
+  format = "pdf",
+  branchId = null,
+  month = null,
+  year = null,
+  fromMonth = null,
+  fromYear = null,
+  toMonth = null,
+  toYear = null,
+  templateId = null,
+  sheetsPerClient = 16,
+}) {
+  const clientRatio = Number(sheetsPerClient) > 0 ? Number(sheetsPerClient) : 16;
   const printerService = require("./printer.service");
   
-  const m = month || new Date().getMonth() + 1;
-  const y = year || new Date().getFullYear();
+  const now = new Date();
+  const fMonth = fromMonth !== null && fromMonth !== undefined
+    ? Number(fromMonth)
+    : (month !== null && month !== undefined ? Number(month) : now.getMonth() + 1);
+  const fYear = fromYear !== null && fromYear !== undefined
+    ? Number(fromYear)
+    : (year !== null && year !== undefined ? Number(year) : now.getFullYear());
+  const tMonth = toMonth !== null && toMonth !== undefined ? Number(toMonth) : fMonth;
+  const tYear = toYear !== null && toYear !== undefined ? Number(toYear) : fYear;
+
+  const isSingleMonth = (fMonth === tMonth && fYear === tYear);
+  const isAllMonths = month !== null && month !== undefined && Number(month) === 0;
+
+  const monthNames = [
+    "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+    "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+  ];
+  const fromMonthName = monthNames[fMonth - 1] || fMonth;
+  const toMonthName = monthNames[tMonth - 1] || tMonth;
+
+  let periodText = "";
+  if (isAllMonths) {
+    periodText = `لجميع شهور سنة ${fYear}`;
+  } else if (isSingleMonth) {
+    periodText = `عن شهر ${fromMonthName} ${fYear}`;
+  } else {
+    periodText = `للفترة من شهر ${fromMonthName} ${fYear} إلى ${toMonthName} ${tYear}`;
+  }
 
   let consumptionResult = await printerService.calculateMonthlyConsumption({
     branchId,
-    month: m,
-    year: y,
+    fromMonth: isAllMonths ? 1 : fMonth,
+    fromYear: fYear,
+    toMonth: isAllMonths ? 12 : tMonth,
+    toYear: tYear,
+    month: isAllMonths ? 0 : (isSingleMonth ? fMonth : null),
+    year: isSingleMonth ? fYear : null,
+    sheetsPerClient: clientRatio,
   });
 
   const consumptionList = consumptionResult.consumption || [];
   
+  const rangeStartDate = new Date(fYear, (isAllMonths ? 1 : fMonth) - 1, 1);
+  const rangeEndDate = new Date(tYear, (isAllMonths ? 12 : tMonth), 1);
+
   const wasteStats = await WasteStatistic.find({
-    ...(branchId ? { branchId } : {})
-  }).lean();
+    ...(branchId ? { branchId } : {}),
+    calculatedAt: { $gte: rangeStartDate, $lt: rangeEndDate }
+  }).sort({ calculatedAt: 1 }).lean();
+
+  // Build per-printer and per-branch waste totals for the requested period.
+  // Each WasteStatistic record is created only when the printer is online and
+  // represents the estimated waste from paper jams & errors at that sync.
+  // We take the AVERAGE per sync (total / count) to avoid inflating by
+  // sync frequency, then multiply by approximate days in the period.
+  // This avoids double-counting the same jams across multiple syncs.
+  const printerWasteMap = new Map(); // pId -> { totalEstimate, count, branchId }
+  for (const w of wasteStats) {
+    const pId = w.printerId?.toString();
+    if (!pId) continue;
+    const val = Number(w.estimatedWastePages ?? 0);
+    if (!printerWasteMap.has(pId)) {
+      printerWasteMap.set(pId, { totalEstimate: val, count: 1, branchId: w.branchId?.toString() });
+    } else {
+      const entry = printerWasteMap.get(pId);
+      entry.totalEstimate += val;
+      entry.count += 1;
+    }
+  }
+
+  // Average per-sync waste estimate for a printer over the period.
+  function getPrinterAvgWaste(pId) {
+    const entry = printerWasteMap.get(pId?.toString());
+    if (!entry || entry.count === 0) return 0;
+    // Average waste per sync. syncs run ~5/day so we don't divide by days.
+    // Just take the mean as a representative figure for the period.
+    return Math.round(entry.totalEstimate / entry.count);
+  }
+
+  function getBranchAvgWaste(bId) {
+    let sum = 0;
+    for (const [pId, entry] of printerWasteMap.entries()) {
+      if (entry.branchId === bId?.toString() && entry.count > 0) {
+        sum += Math.round(entry.totalEstimate / entry.count);
+      }
+    }
+    return sum;
+  }
 
   let formattedData = [];
 
   if (type === "global") {
-    formattedData = consumptionList.map(c => {
-      const branchWaste = wasteStats.filter(w => w.branchId?.toString() === c.branchId?.toString());
-      const wastePages = branchWaste.reduce((sum, w) => sum + (w.estimatedWastePages || 0), 0);
+    formattedData = consumptionList.map((c, idx) => {
+      const wastePages = getBranchAvgWaste(c.branchId);
       
       let scanPages = 0;
       if (c.printers) {
@@ -284,49 +374,100 @@ async function exportCustomReport(actor, { type = "global", format = "pdf", bran
       }
 
       const totalPaper = (c.totalPages || 0) + wastePages;
-      const overallTotalReams = (totalPaper / 500).toFixed(2);
+      const overallTotalReams = Number((totalPaper / 500).toFixed(2));
 
       return {
+        index: idx + 1,
         branchName: c.branchName || "فرع غير معروف",
+        branchCode: c.branchCode || "",
+        printerName: "جميع طابعات الفرع",
         monoPages: c.monoPages || 0,
         colorPages: c.colorPages || 0,
         wastePages: wastePages,
         scanPages: scanPages,
         totalPaper: totalPaper,
-        overallTotalReams: overallTotalReams
+        overallTotalReams: overallTotalReams,
+        requiredReams: Math.ceil(totalPaper / 500),
+        estimatedClients: Math.ceil(totalPaper / clientRatio),
+        currentTotal: c.totalPages || 0,
+        lifetimeTotal: c.lifetimeTotal || c.totalPages || 0,
+        dataQuality: c.dataQuality || "مكتمل",
       };
     });
   } else {
+    let globalIdx = 1;
     for (const c of consumptionList) {
        for (const p of (c.printers || [])) {
-          const printerWaste = wasteStats.filter(w => w.printerId?.toString() === p.printerId?.toString());
-          const wastePages = printerWaste.reduce((sum, w) => sum + (w.estimatedWastePages || 0), 0);
+          const wastePages = getPrinterAvgWaste(p.printerId);
           const scanPages = p.scanPages || 0;
           
           const totalPaper = (p.totalPages || 0) + wastePages;
-          const overallTotalReams = (totalPaper / 500).toFixed(2);
+          const overallTotalReams = Number((totalPaper / 500).toFixed(2));
 
           formattedData.push({
-            branchName: c.branchName,
+            index: globalIdx++,
+            branchName: c.branchName || "فرع غير معروف",
+            branchCode: c.branchCode || "",
             printerName: p.printerName || p.ipAddress || "طابعة غير معروفة",
+            ipAddress: p.ipAddress || "",
+            model: p.model || "",
+            serialNumber: p.serialNumber || "",
+            vendor: p.vendor || "",
+            status: p.status === "online" ? "متصلة" : "غير متصلة",
             monoPages: p.monoPages || 0,
             colorPages: p.colorPages || 0,
             wastePages: wastePages,
             scanPages: scanPages,
             totalPaper: totalPaper,
-            overallTotalReams: overallTotalReams
+            overallTotalReams: overallTotalReams,
+            requiredReams: Math.ceil(totalPaper / 500),
+            estimatedClients: Math.ceil(totalPaper / clientRatio),
+            currentTotal: p.counters?.totalPages || 0,
+            lifetimeTotal: p.lifetimeCounters?.totalPages || 0,
+            dataQuality: c.dataQuality || "مكتمل",
           });
        }
     }
   }
 
   let buffer;
-  const reportName = type === "global" ? "printer-global-report" : `printer-branch-report-${y}`;
-  
-  if (format === "xlsx") {
-    buffer = await buildCustomExcelReport(formattedData, reportName, m, y, type);
-  } else {
-    buffer = await buildCustomPdfReport(formattedData, reportName, m, y, type);
+  const suffix = isSingleMonth ? `-${fYear}-${fMonth}` : `-${fYear}-${fMonth}-to-${tMonth}`;
+  const reportName = type === "global" ? `printer-global-report${suffix}` : `printer-branch-report${suffix}`;
+  const entityName = type === "global" ? "الفروع" : (consumptionList[0]?.branchName || "الفرع");
+  const defaultTitle = `استهلاك ${entityName} للورق ${periodText}`;
+  const dynamicMonthLabel = isAllMonths ? "جميع الشهور" : (isSingleMonth ? fromMonthName : `${fromMonthName} - ${toMonthName}`);
+
+  try {
+    const { getActiveTemplate } = require("../../reports/services/report-template.service");
+    const { buildDynamicPdfReport, buildDynamicExcelReport } = require("../../reports/services/report-generator.service");
+    const template = await getActiveTemplate("printer_consumption", templateId);
+
+    if (format === "xlsx") {
+      buffer = await buildDynamicExcelReport({
+        template,
+        data: formattedData,
+        reportTitle: defaultTitle,
+        month: dynamicMonthLabel,
+        year: fYear,
+        entityName,
+      });
+    } else {
+      buffer = await buildDynamicPdfReport({
+        template,
+        data: formattedData,
+        reportTitle: defaultTitle,
+        month: dynamicMonthLabel,
+        year: fYear,
+        entityName,
+      });
+    }
+  } catch (err) {
+    console.error("Dynamic report generation fallback due to:", err);
+    if (format === "xlsx") {
+      buffer = await buildCustomExcelReport(formattedData, reportName, periodText, fYear, type);
+    } else {
+      buffer = await buildCustomPdfReport(formattedData, reportName, periodText, fYear, type);
+    }
   }
 
   const fileName = `${reportName}-${Date.now()}.${format === "xlsx" ? "xlsx" : "pdf"}`;

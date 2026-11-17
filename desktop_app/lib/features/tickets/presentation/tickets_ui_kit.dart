@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/ticket_models.dart';
 
@@ -104,10 +105,14 @@ class TicketsHeroHeader extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        color: accent.withValues(alpha: isDark ? 0.15 : 0.08),
-        borderRadius: BorderRadius.circular(20),
+        color: accent.withValues(alpha: isDark ? 0.14 : 0.07),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: accent.withValues(alpha: isDark ? 0.22 : 0.15),
+          width: 1,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -119,11 +124,11 @@ class TicketsHeroHeader extends StatelessWidget {
                 height: 52,
                 decoration: BoxDecoration(
                   color: accent,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(15),
                   boxShadow: [
                     BoxShadow(
-                      color: accent.withValues(alpha: 0.3),
-                      blurRadius: 12,
+                      color: accent.withValues(alpha: 0.35),
+                      blurRadius: 14,
                       offset: const Offset(0, 4),
                     ),
                   ],
@@ -139,9 +144,10 @@ class TicketsHeroHeader extends StatelessWidget {
                       title,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w800,
+                        letterSpacing: -0.2,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 3),
                     Text(
                       subtitle,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -153,7 +159,7 @@ class TicketsHeroHeader extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           Row(
             children: [
               Expanded(
@@ -163,7 +169,7 @@ class TicketsHeroHeader extends StatelessWidget {
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(13),
                     ),
                     elevation: 0,
                   ),
@@ -181,12 +187,12 @@ class TicketsHeroHeader extends StatelessWidget {
                   child: FilledButton.tonalIcon(
                     style: FilledButton.styleFrom(
                       backgroundColor: isDark
-                          ? Colors.white.withValues(alpha: 0.1)
+                          ? Colors.white.withValues(alpha: 0.09)
                           : Colors.black.withValues(alpha: 0.05),
                       foregroundColor: isDark ? Colors.white : Colors.black87,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(13),
                       ),
                       elevation: 0,
                     ),
@@ -197,7 +203,7 @@ class TicketsHeroHeader extends StatelessWidget {
                     ),
                     label: Text(
                       secondaryLabel ?? '',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                   ),
                 ),
@@ -208,12 +214,12 @@ class TicketsHeroHeader extends StatelessWidget {
                   child: FilledButton.tonalIcon(
                     style: FilledButton.styleFrom(
                       backgroundColor: isDark
-                          ? Colors.white.withValues(alpha: 0.1)
+                          ? Colors.white.withValues(alpha: 0.09)
                           : Colors.black.withValues(alpha: 0.05),
                       foregroundColor: isDark ? Colors.white : Colors.black87,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(13),
                       ),
                       elevation: 0,
                     ),
@@ -224,7 +230,7 @@ class TicketsHeroHeader extends StatelessWidget {
                     ),
                     label: Text(
                       tertiaryLabel ?? '',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                   ),
                 ),
@@ -260,7 +266,7 @@ class TicketsTypeSegmentBar extends StatelessWidget {
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFE5E5EA),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: List.generate(labels.length, (index) {
@@ -272,11 +278,11 @@ class TicketsTypeSegmentBar extends StatelessWidget {
                 color: selected
                     ? (isDark ? const Color(0xFF3A3A3C) : Colors.white)
                     : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(9),
                 boxShadow: selected
                     ? [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.12),
+                          color: Colors.black.withValues(alpha: 0.10),
                           blurRadius: 4,
                           offset: const Offset(0, 1),
                         ),
@@ -286,11 +292,11 @@ class TicketsTypeSegmentBar extends StatelessWidget {
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(9),
                   onTap: () => onChanged(index),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                      vertical: 8,
+                      vertical: 9,
                       horizontal: 8,
                     ),
                     child: Row(
@@ -311,7 +317,7 @@ class TicketsTypeSegmentBar extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.labelMedium?.copyWith(
                               fontWeight: selected
-                                  ? FontWeight.bold
+                                  ? FontWeight.w800
                                   : FontWeight.w600,
                               color: selected
                                   ? (isDark ? Colors.white : Colors.black87)
@@ -345,17 +351,19 @@ class TicketsStatGroup extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: isDark
-            ? null
-            : Border.all(color: Colors.black.withValues(alpha: 0.05)),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.07)
+              : Colors.black.withValues(alpha: 0.06),
+        ),
         boxShadow: isDark
             ? []
             : [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.02),
                   blurRadius: 10,
-                  offset: const Offset(0, 4),
+                  offset: const Offset(0, 3),
                 ),
               ],
       ),
@@ -418,8 +426,8 @@ class TicketsStatGroup extends StatelessWidget {
                       width: 1,
                       thickness: 1,
                       color: isDark
-                          ? Colors.white.withValues(alpha: 0.05)
-                          : Colors.black.withValues(alpha: 0.05),
+                          ? Colors.white.withValues(alpha: 0.06)
+                          : Colors.black.withValues(alpha: 0.06),
                       indent: 12,
                       endIndent: 12,
                     ),
@@ -480,19 +488,62 @@ class _TicketPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
       ),
       child: Text(
         label,
         style: TextStyle(
           color: color,
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w800,
         ),
+      ),
+    );
+  }
+}
+
+class _TicketMiniTag extends StatelessWidget {
+  const _TicketMiniTag({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -527,22 +578,24 @@ class ModernTicketCard extends StatelessWidget {
         ? ticket.lastPublicMessage
         : (ticket.description.trim().isNotEmpty
               ? ticket.description
-              : 'لا يوجد وصف مختصر.');
+              : 'لا يوجد وصف مختصر لهذا الطلب.');
 
     return Container(
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: isDark
-            ? null
-            : Border.all(color: Colors.black.withValues(alpha: 0.05)),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
+        ),
         boxShadow: isDark
             ? []
             : [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.02),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
+                  color: Colors.black.withValues(alpha: 0.025),
+                  blurRadius: 12,
+                  offset: const Offset(0, 3),
                 ),
               ],
       ),
@@ -552,21 +605,22 @@ class ModernTicketCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(18),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Top Row: Type Pill, Status & Priority Badges, Ticket Number
                 Row(
                   children: [
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
+                        horizontal: 9,
+                        vertical: 5,
                       ),
                       decoration: BoxDecoration(
                         color: accent.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -576,7 +630,7 @@ class ModernTicketCard extends StatelessWidget {
                             size: 14,
                             color: accent,
                           ),
-                          const SizedBox(width: 6),
+                          const SizedBox(width: 5),
                           Text(
                             TicketsPalette.typeLabel(ticket.ticketType),
                             style: theme.textTheme.labelSmall?.copyWith(
@@ -587,14 +641,34 @@ class ModernTicketCard extends StatelessWidget {
                         ],
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    TicketStatusBadge(status: ticket.status),
+                    if (ticket.ticketType == 'ticket') ...[
+                      const SizedBox(width: 6),
+                      TicketPriorityBadge(priority: ticket.priority),
+                    ],
                     const Spacer(),
-                    Text(
-                      ticket.ticketNumber.isNotEmpty
-                          ? ticket.ticketNumber
-                          : '—',
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: onSurfaceVariant,
-                        fontWeight: FontWeight.w700,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3.5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.06)
+                            : const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        ticket.ticketNumber.isNotEmpty
+                            ? '#${ticket.ticketNumber}'
+                            : '—',
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: onSurfaceVariant,
+                        ),
                       ),
                     ),
                   ],
@@ -609,60 +683,94 @@ class ModernTicketCard extends StatelessWidget {
                     color: onSurface,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(
                   preview,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: onSurfaceVariant,
-                    height: 1.45,
+                    height: 1.5,
                   ),
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 12),
+                // Metadata chips
                 Wrap(
                   spacing: 8,
-                  runSpacing: 8,
+                  runSpacing: 6,
                   children: [
-                    TicketStatusBadge(status: ticket.status),
-                    if (ticket.ticketType == 'ticket')
-                      TicketPriorityBadge(priority: ticket.priority),
                     if (ticket.targetDepartmentName != null &&
                         ticket.targetDepartmentName!.trim().isNotEmpty)
-                      _TicketPill(
-                        label: 'إلى: ${ticket.targetDepartmentName}',
+                      _TicketMiniTag(
+                        icon: Icons.account_tree_outlined,
+                        label: ticket.targetDepartmentName!,
                         color: const Color(0xFF0F766E),
                       ),
+                    if (ticket.branchDepartmentName != null &&
+                        ticket.branchDepartmentName!.trim().isNotEmpty)
+                      _TicketMiniTag(
+                        icon: Icons.store_outlined,
+                        label: ticket.branchDepartmentName!,
+                        color: const Color(0xFFD97706),
+                      ),
+                    _TicketMiniTag(
+                      icon: Icons.person_outline_rounded,
+                      label: ticket.createdBy.displayName,
+                      color: TicketsPalette.suggestion,
+                    ),
                     if (ticket.assignedTo != null)
-                      _TicketPill(
+                      _TicketMiniTag(
+                        icon: Icons.assignment_ind_outlined,
                         label: ticket.assignedTo!.displayName,
                         color: TicketsPalette.brand,
                       ),
                   ],
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 12),
+                Divider(
+                  height: 1,
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.06)
+                      : Colors.black.withValues(alpha: 0.05),
+                ),
+                const SizedBox(height: 10),
                 Row(
                   children: [
                     Icon(
                       Icons.schedule_rounded,
-                      size: 16,
+                      size: 15,
                       color: onSurfaceVariant,
                     ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
                         ticket.lastUpdateAt != null
-                            ? 'آخر تحديث ${dateFormat(ticket.lastUpdateAt!)}'
-                            : 'بدون تحديثات',
+                            ? 'آخر نشاط: ${dateFormat(ticket.lastUpdateAt!)}'
+                            : 'تاريخ الإنشاء: ${dateFormat(ticket.createdAt)}',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: onSurfaceVariant,
+                          fontSize: 12,
                         ),
                       ),
                     ),
-                    Icon(
-                      Icons.chevron_left_rounded,
-                      size: 18,
-                      color: onSurfaceVariant.withValues(alpha: 0.5),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'عرض التفاصيل',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: accent,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.arrow_forward_ios_rounded,
+                          size: 12,
+                          color: accent,
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -704,47 +812,49 @@ class TicketDetailsHeaderCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        border: isDark
-            ? null
-            : Border.all(color: Colors.black.withValues(alpha: 0.05)),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
+        ),
         boxShadow: isDark
             ? []
             : [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.02),
-                  blurRadius: 10,
+                  color: Colors.black.withValues(alpha: 0.03),
+                  blurRadius: 16,
                   offset: const Offset(0, 4),
                 ),
               ],
       ),
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 1. Top Badges Row: Type Pill, Ticket #, Priority, Status
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
                   color: accent.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: accent.withValues(alpha: 0.25)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
                       TicketsPalette.typeIcon(ticket.ticketType),
-                      size: 16,
+                      size: 15,
                       color: accent,
                     ),
                     const SizedBox(width: 6),
                     Text(
                       TicketsPalette.typeLabel(ticket.ticketType),
-                      style: theme.textTheme.labelLarge?.copyWith(
+                      style: theme.textTheme.labelMedium?.copyWith(
                         color: accent,
                         fontWeight: FontWeight.w800,
                       ),
@@ -752,120 +862,328 @@ class TicketDetailsHeaderCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const Spacer(),
-              Text(
-                ticket.ticketNumber.isNotEmpty ? ticket.ticketNumber : '—',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            hasTitle ? ticket.title : 'بدون عنوان',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: onSurface,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            hasDescription ? ticket.description : 'لا يوجد وصف لهذا الطلب.',
-            style: theme.textTheme.bodyLarge?.copyWith(
-              color: onSurfaceVariant,
-              height: 1.6,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              TicketStatusBadge(status: ticket.status),
-              if (ticket.ticketType == 'ticket')
-                TicketPriorityBadge(priority: ticket.priority),
-              if (ticket.targetDepartmentName != null &&
-                  ticket.targetDepartmentName!.trim().isNotEmpty)
-                _TicketPill(
-                  label: 'موجه إلى: ${ticket.targetDepartmentName}',
-                  color: const Color(0xFF0F766E),
-                ),
-              if (ticket.branchDepartmentName != null &&
-                  ticket.branchDepartmentName!.trim().isNotEmpty)
-                _TicketPill(
-                  label: 'قسم مقدم الطلب: ${ticket.branchDepartmentName}',
-                  color: TicketsPalette.brand,
-                ),
-              _TicketPill(
-                label: 'مقدم الطلب: ${ticket.createdBy.displayName}',
-                color: TicketsPalette.suggestion,
-              ),
-              if (ticket.assignedTo != null)
-                _TicketPill(
-                  label: 'المسؤول: ${ticket.assignedTo!.displayName}',
-                  color: TicketsPalette.brand,
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'تاريخ الإنشاء: ${dateFormat(ticket.createdAt)} • آخر تحديث: ${ticket.lastUpdateAt != null ? dateFormat(ticket.lastUpdateAt!) : '—'}',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          if (canManage && onChangeStatus != null && onAssign != null) ...[
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: isDark
-                          ? Colors.white.withValues(alpha: 0.1)
-                          : Colors.black.withValues(alpha: 0.05),
-                      foregroundColor: isDark ? Colors.white : Colors.black87,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+              const SizedBox(width: 10),
+              // Copyable Ticket Number
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: ticket.ticketNumber.isNotEmpty
+                    ? () {
+                        Clipboard.setData(
+                          ClipboardData(text: ticket.ticketNumber),
+                        );
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            behavior: SnackBarBehavior.floating,
+                            duration: Duration(seconds: 2),
+                            content: Text('تم نسخ رقم التذكرة إلى الحافظة'),
+                          ),
+                        );
+                      }
+                    : null,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.06)
+                        : const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        ticket.ticketNumber.isNotEmpty
+                            ? '#${ticket.ticketNumber}'
+                            : '—',
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: onSurfaceVariant,
+                        ),
                       ),
-                      elevation: 0,
-                    ),
-                    onPressed: onChangeStatus,
-                    icon: const Icon(Icons.flag_rounded, size: 20),
-                    label: const Text(
-                      'تغيير الحالة',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
+                      if (ticket.ticketNumber.isNotEmpty) ...[
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.copy_rounded,
+                          size: 13,
+                          color: onSurfaceVariant.withValues(alpha: 0.7),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: isDark
-                          ? Colors.white.withValues(alpha: 0.1)
-                          : Colors.black.withValues(alpha: 0.05),
-                      foregroundColor: isDark ? Colors.white : Colors.black87,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+              ),
+              const Spacer(),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (ticket.ticketType == 'ticket')
+                    TicketPriorityBadge(priority: ticket.priority),
+                  TicketStatusBadge(status: ticket.status),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+
+          // 2. Title
+          SelectableText(
+            hasTitle ? ticket.title : 'طلب بدون عنوان',
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: onSurface,
+              letterSpacing: -0.3,
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // 3. Inset Description Box
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? const Color(0xFF252528)
+                  : const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : const Color(0xFFE2E8F0),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.description_outlined,
+                      size: 15,
+                      color: onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'تفاصيل ووصف الطلب:',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
                       ),
-                      elevation: 0,
                     ),
-                    onPressed: onAssign,
-                    icon: const Icon(Icons.person_add_alt_1_rounded, size: 20),
-                    label: const Text(
-                      'إسناد',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                SelectableText(
+                  hasDescription
+                      ? ticket.description
+                      : 'لا يوجد وصف تفصيلي لهذا الطلب.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: onSurface.withValues(alpha: 0.9),
+                    height: 1.65,
+                    fontSize: 14.5,
                   ),
                 ),
               ],
             ),
+          ),
+          const SizedBox(height: 18),
+
+          // 4. Structured Metadata Bento Tiles
+          Wrap(
+            spacing: 12,
+            runSpacing: 10,
+            children: [
+              _TicketMetaTile(
+                icon: Icons.person_outline_rounded,
+                label: 'مقدم الطلب',
+                value: ticket.createdBy.displayName,
+                color: TicketsPalette.suggestion,
+              ),
+              if (ticket.targetDepartmentName != null &&
+                  ticket.targetDepartmentName!.trim().isNotEmpty)
+                _TicketMetaTile(
+                  icon: Icons.account_tree_outlined,
+                  label: 'القسم المعني',
+                  value: ticket.targetDepartmentName!,
+                  color: const Color(0xFF0F766E),
+                ),
+              if (ticket.branchDepartmentName != null &&
+                  ticket.branchDepartmentName!.trim().isNotEmpty)
+                _TicketMetaTile(
+                  icon: Icons.store_outlined,
+                  label: 'فرع مقدم الطلب',
+                  value: ticket.branchDepartmentName!,
+                  color: const Color(0xFFD97706),
+                ),
+              _TicketMetaTile(
+                icon: Icons.assignment_ind_outlined,
+                label: 'المسؤول الحالي',
+                value: ticket.assignedTo?.displayName ?? 'غير مسند بعد',
+                color: ticket.assignedTo != null
+                    ? TicketsPalette.brand
+                    : const Color(0xFF64748B),
+              ),
+              _TicketMetaTile(
+                icon: Icons.access_time_rounded,
+                label: 'تاريخ الإنشاء',
+                value: dateFormat(ticket.createdAt),
+                color: const Color(0xFF64748B),
+              ),
+              if (ticket.lastUpdateAt != null)
+                _TicketMetaTile(
+                  icon: Icons.update_rounded,
+                  label: 'آخر نشاط',
+                  value: dateFormat(ticket.lastUpdateAt!),
+                  color: const Color(0xFF64748B),
+                ),
+            ],
+          ),
+
+          // 5. Admin/Manager Action Buttons
+          if (canManage && (onChangeStatus != null || onAssign != null)) ...[
+            const SizedBox(height: 20),
+            Divider(
+              height: 1,
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.black.withValues(alpha: 0.06),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                if (onChangeStatus != null)
+                  Expanded(
+                    child: FilledButton.tonalIcon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: isDark
+                            ? Colors.white.withValues(alpha: 0.08)
+                            : const Color(0xFFF1F5F9),
+                        foregroundColor: isDark ? Colors.white : Colors.black87,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          side: BorderSide(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.08)
+                                : Colors.black.withValues(alpha: 0.06),
+                          ),
+                        ),
+                        elevation: 0,
+                      ),
+                      onPressed: onChangeStatus,
+                      icon: const Icon(Icons.swap_horiz_rounded, size: 20),
+                      label: Text(
+                        'تغيير الحالة (${ticketStatusLabel(ticket.status)})',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
+                if (onChangeStatus != null && onAssign != null)
+                  const SizedBox(width: 12),
+                if (onAssign != null)
+                  Expanded(
+                    child: FilledButton.tonalIcon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: accent.withValues(alpha: 0.12),
+                        foregroundColor: accent,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          side: BorderSide(
+                            color: accent.withValues(alpha: 0.25),
+                          ),
+                        ),
+                        elevation: 0,
+                      ),
+                      onPressed: onAssign,
+                      icon: const Icon(Icons.person_add_alt_1_rounded, size: 20),
+                      label: Text(
+                        ticket.assignedTo != null
+                            ? 'إعادة الإسناد (${ticket.assignedTo!.displayName})'
+                            : 'إسناد لموظف دعم',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+class _TicketMetaTile extends StatelessWidget {
+  const _TicketMetaTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      constraints: const BoxConstraints(minWidth: 150),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF252528) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.05)
+              : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, size: 16, color: color),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: 11,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -882,6 +1200,8 @@ class TicketTimelineTile extends StatelessWidget {
     required this.timestamp,
     required this.accent,
     required this.isInternal,
+    this.isFirst = false,
+    this.isLast = false,
   });
 
   final String label;
@@ -891,6 +1211,8 @@ class TicketTimelineTile extends StatelessWidget {
   final String timestamp;
   final Color accent;
   final bool isInternal;
+  final bool isFirst;
+  final bool isLast;
 
   @override
   Widget build(BuildContext context) {
@@ -901,60 +1223,137 @@ class TicketTimelineTile extends StatelessWidget {
     final actorLabel = actor.trim().isNotEmpty ? actor : 'مستخدم';
     final body = message.trim().isNotEmpty ? message : '—';
 
+    final tileBg = isInternal
+        ? (isDark ? const Color(0xFF2A2038) : const Color(0xFFFAF5FF))
+        : (isDark ? const Color(0xFF242426) : Colors.white);
+
+    final tileBorder = isInternal
+        ? TicketsPalette.suggestion.withValues(alpha: isDark ? 0.35 : 0.25)
+        : (isDark
+            ? Colors.white.withValues(alpha: 0.07)
+            : Colors.black.withValues(alpha: 0.06));
+
+    final iconColor = isInternal ? TicketsPalette.suggestion : accent;
+
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+        color: tileBg,
         borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: tileBorder, width: isInternal ? 1.5 : 1),
+        boxShadow: isDark
+            ? []
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.02),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
       ),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Expanded(
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _TimelineTag(label: label, color: accent),
-                    _TimelineTag(
-                      label: visibilityLabel,
-                      color: isInternal
-                          ? TicketsPalette.suggestion
-                          : TicketsPalette.brand,
-                    ),
-                  ],
+              // Avatar Circle
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  isInternal
+                      ? Icons.lock_rounded
+                      : (label.contains('حالة')
+                          ? Icons.published_with_changes_rounded
+                          : (label.contains('مسؤول') || label.contains('إسناد')
+                              ? Icons.person_pin_rounded
+                              : Icons.chat_bubble_outline_rounded)),
+                  size: 18,
+                  color: iconColor,
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(
-                timestamp,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: onSurfaceVariant,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            actorLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: onSurface,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _TimelineTag(label: label, color: accent),
+                        if (isInternal) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: TicketsPalette.suggestion
+                                  .withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.lock_rounded,
+                                  size: 11,
+                                  color: TicketsPalette.suggestion,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'ملاحظة داخلية',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: TicketsPalette.suggestion,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      timestamp,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: onSurfaceVariant,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
           const SizedBox(height: 12),
-          Text(
-            actorLabel,
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: onSurface,
-              fontSize: 14,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            body,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              height: 1.7,
-              color: onSurface,
-              fontSize: 14,
+          Padding(
+            padding: const EdgeInsetsDirectional.only(start: 48),
+            child: SelectableText(
+              body,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                height: 1.65,
+                color: onSurface.withValues(alpha: 0.95),
+                fontSize: 14,
+              ),
             ),
           ),
         ],
@@ -972,7 +1371,7 @@ class _TimelineTag extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(999),
@@ -982,7 +1381,7 @@ class _TimelineTag extends StatelessWidget {
         label,
         style: TextStyle(
           color: color,
-          fontSize: 12.5,
+          fontSize: 11.5,
           fontWeight: FontWeight.w800,
         ),
       ),

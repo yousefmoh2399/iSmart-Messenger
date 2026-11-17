@@ -91,7 +91,7 @@ class FakeChatRepository implements ChatRepository {
       await Future<void>.delayed(delay);
     }
     if (shouldFail) {
-      throw Exception('Simulated network error');
+      throw Exception('Simulated server rejection');
     }
     final serverMsg = ChatMessage(
       id: 'srv_${clientMessageId ?? sendCallCount}',
@@ -136,6 +136,9 @@ class FakeChatRepository implements ChatRepository {
 
 class FakeChatSocketService implements ChatSocketService {
   final _controller = StreamController<ChatSocketEvent>.broadcast();
+
+  @override
+  bool get isConnected => true;
 
   @override
   Stream<ChatSocketEvent> get events => _controller.stream;

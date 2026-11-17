@@ -9,7 +9,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:desktop_app/features/chat/data/chat_local_cache.dart';
 import 'package:desktop_app/features/chat/models/chat_models.dart';
-import 'package:desktop_app/features/chat/presentation/chat_overview_controller.dart';
 import 'package:desktop_app/features/chat/data/chat_repository.dart';
 import 'package:desktop_app/features/chat/data/chat_socket_service.dart';
 import 'package:desktop_app/shared/providers/providers.dart';

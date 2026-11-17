@@ -39,10 +39,14 @@ class MobilePrinterOverview {
 
   factory MobilePrinterOverview.fromJson(Map<String, dynamic> json) {
     final dashboard = _map(json['dashboard']);
+    final allPrintersList = _list(dashboard['printers']);
+    final printersList = allPrintersList.isNotEmpty
+        ? allPrintersList
+        : _list(dashboard['topPrinters']);
     return MobilePrinterOverview(
       totals: _numMap(dashboard['totals']),
       branches: _list(dashboard['branches']).map(_map).toList(),
-      printers: _list(dashboard['topPrinters']).map(_map).toList(),
+      printers: printersList.map(_map).toList(),
       notifications: _list(dashboard['notifications']).map(_map).toList(),
     );
   }

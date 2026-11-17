@@ -1,299 +1,3 @@
-// import 'package:flutter/material.dart';
-
-// import '../../../../shared/models/app_user.dart';
-// import '../../models/chat_models.dart';
-// import 'chat_list_item.dart';
-// import 'chat_ui_helpers.dart';
-
-// class ChatSidebar extends StatelessWidget {
-//   const ChatSidebar({
-//     super.key,
-//     required this.currentUser,
-//     required this.currentThemeMode,
-//     required this.searchController,
-//     required this.currentFilter,
-//     required this.conversations,
-//     required this.selectedConversationId,
-//     required this.onFilterChanged,
-//     required this.onConversationSelected,
-//     required this.onCreateConversation,
-//     required this.onRefresh,
-//     required this.onOpenAdmin,
-//     required this.onToggleTheme,
-//     required this.onTogglePin,
-//     required this.onToggleMute,
-//     required this.onToggleArchive,
-//     required this.onDeleteConversation,
-//   });
-
-//   final AppUser? currentUser;
-//   final ThemeMode currentThemeMode;
-//   final TextEditingController searchController;
-//   final ChatSidebarFilter currentFilter;
-//   final List<ChatConversation> conversations;
-//   final String? selectedConversationId;
-//   final ValueChanged<ChatSidebarFilter> onFilterChanged;
-//   final ValueChanged<ChatConversation> onConversationSelected;
-//   final VoidCallback onCreateConversation;
-//   final VoidCallback onRefresh;
-//   final VoidCallback onOpenAdmin;
-//   final VoidCallback onToggleTheme;
-//   final ValueChanged<ChatConversation> onTogglePin;
-//   final ValueChanged<ChatConversation> onToggleMute;
-//   final ValueChanged<ChatConversation> onToggleArchive;
-//   final ValueChanged<ChatConversation> onDeleteConversation;
-
-//   @override
-//   Widget build(BuildContext context) {
-//     final surface = Theme.of(context).colorScheme.surface;
-//     final userLabel = (currentUser?.fullName.trim().isNotEmpty ?? false)
-//         ? currentUser!.fullName
-//         : (currentUser?.username ?? 'User');
-//     final unreadTotal = conversations.fold<int>(
-//       0,
-//       (sum, conversation) => sum + conversation.unreadCount,
-//     );
-
-//     return Container(
-//       color: surface,
-//       child: Column(
-//         children: [
-//           _SidebarHeader(
-//             userLabel: userLabel,
-//             unreadTotal: unreadTotal,
-//             canOpenAdmin:
-//                 currentUser?.can('canCreateUsers') == true ||
-//                 currentUser?.can('canCreateDepartments') == true,
-//             currentThemeMode: currentThemeMode,
-//             onCreateConversation: onCreateConversation,
-//             onRefresh: onRefresh,
-//             onOpenAdmin: onOpenAdmin,
-//             onToggleTheme: onToggleTheme,
-//           ),
-//           Padding(
-//             padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-//             child: TextField(
-//               controller: searchController,
-//               decoration: const InputDecoration(
-//                 hintText: 'Search',
-//                 prefixIcon: Icon(Icons.search_rounded),
-//               ),
-//             ),
-//           ),
-//           Padding(
-//             padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-//             child: Wrap(
-//               spacing: 6,
-//               runSpacing: 6,
-//               children: [
-//                 _FilterButton(
-//                   label: 'All',
-//                   selected: currentFilter == ChatSidebarFilter.all,
-//                   onTap: () => onFilterChanged(ChatSidebarFilter.all),
-//                 ),
-//                 _FilterButton(
-//                   label: 'Direct',
-//                   selected: currentFilter == ChatSidebarFilter.direct,
-//                   onTap: () => onFilterChanged(ChatSidebarFilter.direct),
-//                 ),
-//                 _FilterButton(
-//                   label: 'Departments',
-//                   selected: currentFilter == ChatSidebarFilter.departments,
-//                   onTap: () => onFilterChanged(ChatSidebarFilter.departments),
-//                 ),
-//                 _FilterButton(
-//                   label: 'Rooms',
-//                   selected: currentFilter == ChatSidebarFilter.rooms,
-//                   onTap: () => onFilterChanged(ChatSidebarFilter.rooms),
-//                 ),
-//               ],
-//             ),
-//           ),
-//           const Divider(height: 1),
-//           Expanded(
-//             child: conversations.isEmpty
-//                 ? const Center(child: Text('No conversations'))
-//                 : Scrollbar(
-//                     child: ListView.builder(
-//                       padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
-//                       itemCount: conversations.length,
-//                       itemBuilder: (context, index) {
-//                         final conversation = conversations[index];
-//                         return Padding(
-//                           padding: const EdgeInsets.only(bottom: 2),
-//                           child: ChatListItem(
-//                             conversation: conversation,
-//                             currentUserId: currentUser?.id ?? '',
-//                             selected: selectedConversationId == conversation.id,
-//                             onTap: () => onConversationSelected(conversation),
-//                             onTogglePin: () => onTogglePin(conversation),
-//                             onToggleMute: () => onToggleMute(conversation),
-//                             onToggleArchive: () =>
-//                                 onToggleArchive(conversation),
-//                             onDeleteConversation: () =>
-//                                 onDeleteConversation(conversation),
-//                           ),
-//                         );
-//                       },
-//                     ),
-//                   ),
-//           ),
-//         ],
-//       ),
-//     );
-//   }
-// }
-
-// class _SidebarHeader extends ConsumerWidget {
-//   const _SidebarHeader({
-//     required this.userLabel,
-//     required this.unreadTotal,
-//     required this.canOpenAdmin,
-//     required this.currentThemeMode,
-//     required this.onCreateConversation,
-//     required this.onRefresh,
-//     required this.onOpenAdmin,
-//     required this.onToggleTheme,
-//   });
-
-//   final String userLabel;
-//   final int unreadTotal;
-//   final bool canOpenAdmin;
-//   final ThemeMode currentThemeMode;
-//   final VoidCallback onCreateConversation;
-//   final VoidCallback onRefresh;
-//   final VoidCallback onOpenAdmin;
-//   final VoidCallback onToggleTheme;
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Padding(
-//       padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-//       child: Column(
-//         children: [
-//           Row(
-//             children: [
-//               CircleAvatar(
-//                 radius: 22,
-//                 backgroundColor: const Color(
-//                   0xFF3390EC,
-//                 ).withValues(alpha: 0.18),
-//                 child: Text(
-//                   _firstCharacter(userLabel).toUpperCase(),
-//                   style: const TextStyle(
-//                     fontWeight: FontWeight.w700,
-//                     color: Color(0xFF1D4E89),
-//                   ),
-//                 ),
-//               ),
-//               const SizedBox(width: 10),
-//               Expanded(
-//                 child: Column(
-//                   crossAxisAlignment: CrossAxisAlignment.start,
-//                   children: [
-//                     Text(
-//                       userLabel,
-//                       maxLines: 1,
-//                       overflow: TextOverflow.ellipsis,
-//                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-//                         fontWeight: FontWeight.w700,
-//                       ),
-//                     ),
-//                     const SizedBox(height: 2),
-//                     Text(
-//                       '$unreadTotal unread',
-//                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-//                         color: Theme.of(context).colorScheme.onSurfaceVariant,
-//                       ),
-//                     ),
-//                   ],
-//                 ),
-//               ),
-//               IconButton(
-//                 tooltip: 'Theme',
-//                 onPressed: onToggleTheme,
-//                 icon: Icon(switch (currentThemeMode) {
-//                   ThemeMode.dark => Icons.dark_mode_outlined,
-//                   ThemeMode.system => Icons.brightness_auto_outlined,
-//                   ThemeMode.light => Icons.light_mode_outlined,
-//                 }),
-//               ),
-//               IconButton(
-//                 tooltip: 'Refresh',
-//                 onPressed: onRefresh,
-//                 icon: const Icon(Icons.refresh_rounded),
-//               ),
-//             ],
-//           ),
-//           const SizedBox(height: 8),
-//           Row(
-//             children: [
-//               Expanded(
-//                 child: FilledButton.icon(
-//                   onPressed: onCreateConversation,
-//                   icon: const Icon(Icons.edit_square),
-//                   label: const Text('New'),
-//                 ),
-//               ),
-//               if (canOpenAdmin) ...[
-//                 const SizedBox(width: 8),
-//                 IconButton(
-//                   tooltip: 'Admin',
-//                   onPressed: onOpenAdmin,
-//                   icon: const Icon(Icons.admin_panel_settings_outlined),
-//                 ),
-//               ],
-//             ],
-//           ),
-//         ],
-//       ),
-//     );
-//   }
-// }
-
-// String _firstCharacter(String value) {
-//   final trimmed = value.trim();
-//   if (trimmed.isEmpty) {
-//     return 'U';
-//   }
-//   return trimmed.substring(0, 1);
-// }
-
-// class _FilterButton extends StatelessWidget {
-//   const _FilterButton({
-//     required this.label,
-//     required this.selected,
-//     required this.onTap,
-//   });
-
-//   final String label;
-//   final bool selected;
-//   final VoidCallback onTap;
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Material(
-//       color: selected ? const Color(0xFFE8F2FF) : const Color(0xFFF3F6FA),
-//       borderRadius: BorderRadius.circular(10),
-//       child: InkWell(
-//         borderRadius: BorderRadius.circular(10),
-//         onTap: onTap,
-//         child: Padding(
-//           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-//           child: Text(
-//             label,
-//             style: Theme.of(context).textTheme.labelMedium?.copyWith(
-//               color: selected
-//                   ? const Color(0xFF2D78C6)
-//                   : const Color(0xFF5A6A78),
-//               fontWeight: FontWeight.w700,
-//             ),
-//           ),
-//         ),
-//       ),
-//     );
-//   }
-// }
 import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
@@ -306,8 +10,11 @@ import '../../models/chat_models.dart';
 import '../../providers/chat_folders_provider.dart';
 import '../chat_appearance.dart';
 import 'chat_folder_inline_item.dart';
+import 'create_chat_folder_dialog.dart';
+import '../../utils/chat_search_utils.dart';
 import 'chat_list_item.dart';
 import 'chat_ui_helpers.dart';
+import 'instant_clipboard_sync_dialog.dart';
 
 class ChatSidebar extends ConsumerWidget {
   const ChatSidebar({
@@ -376,7 +83,7 @@ class ChatSidebar extends ConsumerWidget {
     final baseTheme = Theme.of(context);
     final colorScheme = baseTheme.colorScheme;
     final isDark = baseTheme.brightness == Brightness.dark;
-    final query = searchController.text.trim().toLowerCase();
+    final query = searchController.text.trim();
     final chatPreferences =
         currentUser?.chatPreferences ?? ChatPreferences.defaults;
     final appearance = ChatAppearanceCatalog.resolveAppearance(
@@ -417,89 +124,168 @@ class ChatSidebar extends ConsumerWidget {
       0,
       (sum, c) => sum + c.unreadCount,
     );
-    final departmentById = {
-      for (final department in overview.departments) department.id: department,
+    final departmentByIdAndCode = <String, DepartmentSummary>{
+      for (final department in overview.departments) ...{
+        department.id: department,
+        department.id.trim(): department,
+        if (department.code.trim().isNotEmpty) ...{
+          department.code: department,
+          department.code.trim(): department,
+          department.code.trim().toLowerCase(): department,
+          department.code.trim().toUpperCase(): department,
+        },
+        if (department.name.trim().isNotEmpty) ...{
+          department.name.trim(): department,
+          department.name.trim().toLowerCase(): department,
+        },
+      },
     };
-    final branchById = {
-      for (final branch in overview.branches) branch.id: branch,
-    };
-    final recentConversations = (currentFilter == ChatSidebarFilter.rooms
-            ? const <ChatConversation>[]
-            : currentFilter == ChatSidebarFilter.favorites
-                ? const <ChatConversation>[]
-                : currentFilter == ChatSidebarFilter.archived
-                    ? conversations
-                        .where((c) => c.type == 'direct' && c.isArchived)
-                        .toList()
-                    : currentFilter == ChatSidebarFilter.branches
-                        ? const <ChatConversation>[]
-                        : currentFilter == ChatSidebarFilter.direct
-                            ? conversations
-                                .where((c) => c.type == 'direct' && !c.isArchived)
-                                .toList()
-                            : conversations.take(6).toList())
-        .where((c) => !folderConversationIds.contains(c.id))
-        .toList();
-    final groupedSpaces = switch (currentFilter) {
-      ChatSidebarFilter.all => conversations.where(
-        (conversation) => conversation.type != 'direct',
-      ),
-      ChatSidebarFilter.direct => const <ChatConversation>[],
-      ChatSidebarFilter.departments => conversations.where(
-        (conversation) => conversation.type == 'department',
-      ),
-      ChatSidebarFilter.branches => const <ChatConversation>[],
-      ChatSidebarFilter.rooms => conversations.where(
-        (conversation) =>
-            conversation.type == 'group' ||
-            conversation.type == 'broadcast' ||
-            conversation.type == 'department',
-      ),
-      ChatSidebarFilter.favorites => conversations.where(
-        (conversation) => conversation.isFavorite,
-      ),
-      ChatSidebarFilter.archived => const <ChatConversation>[],
-    }.toList();
 
+    final branchByIdAndCode = <String, BranchSummary>{
+      for (final branch in overview.branches) ...{
+        branch.id: branch,
+        branch.id.trim(): branch,
+        if (branch.code.trim().isNotEmpty) ...{
+          branch.code: branch,
+          branch.code.trim(): branch,
+          branch.code.trim().toUpperCase(): branch,
+          branch.code.trim().toLowerCase(): branch,
+        },
+        if (branch.name.trim().isNotEmpty) ...{
+          branch.name.trim(): branch,
+          branch.name.trim().toLowerCase(): branch,
+        },
+      },
+    };
+
+    BranchSummary? resolveBranch(ChatDirectoryUser user) {
+      if (user.branchId != null && user.branchId!.trim().isNotEmpty) {
+        final key = user.branchId!.trim();
+        final match = branchByIdAndCode[key] ??
+            branchByIdAndCode[key.toUpperCase()] ??
+            branchByIdAndCode[key.toLowerCase()];
+        if (match != null) return match;
+      }
+      if (user.branchCode.trim().isNotEmpty) {
+        final key = user.branchCode.trim();
+        final match = branchByIdAndCode[key] ??
+            branchByIdAndCode[key.toUpperCase()] ??
+            branchByIdAndCode[key.toLowerCase()];
+        if (match != null) return match;
+      }
+      return null;
+    }
+
+    List<DepartmentSummary> resolveDepartments(ChatDirectoryUser user) {
+      final matched = <DepartmentSummary>{};
+      for (final id in user.allDepartmentIds) {
+        if (id.trim().isEmpty) continue;
+        final key = id.trim();
+        final match = departmentByIdAndCode[key] ??
+            departmentByIdAndCode[key.toLowerCase()] ??
+            departmentByIdAndCode[key.toUpperCase()];
+        if (match != null) matched.add(match);
+      }
+      if (matched.isEmpty &&
+          user.departmentId != null &&
+          user.departmentId!.trim().isNotEmpty) {
+        final key = user.departmentId!.trim();
+        final match = departmentByIdAndCode[key] ??
+            departmentByIdAndCode[key.toLowerCase()] ??
+            departmentByIdAndCode[key.toUpperCase()];
+        if (match != null) matched.add(match);
+      }
+      return matched.toList();
+    }
+
+    ChatDirectoryUser mergeUser(
+      ChatDirectoryUser primary,
+      ChatDirectoryUser fallback,
+    ) {
+      return primary.copyWith(
+        fullName: primary.fullName.trim().isNotEmpty
+            ? primary.fullName
+            : fallback.fullName,
+        username: primary.username.trim().isNotEmpty
+            ? primary.username
+            : fallback.username,
+        jobTitle: primary.jobTitle.trim().isNotEmpty
+            ? primary.jobTitle
+            : fallback.jobTitle,
+        departmentId: (primary.departmentId != null &&
+                primary.departmentId!.trim().isNotEmpty)
+            ? primary.departmentId
+            : fallback.departmentId,
+        departmentIds: primary.departmentIds.isNotEmpty
+            ? primary.departmentIds
+            : fallback.departmentIds,
+        branchId: (primary.branchId != null &&
+                primary.branchId!.trim().isNotEmpty)
+            ? primary.branchId
+            : fallback.branchId,
+        branchCode: (primary.branchCode.isNotEmpty &&
+                primary.branchCode.toLowerCase() != 'main')
+            ? primary.branchCode
+            : fallback.branchCode,
+        avatarUrl: primary.avatarUrl ?? fallback.avatarUrl,
+        isOnline: primary.isOnline || fallback.isOnline,
+        presenceStatus: primary.isOnline
+            ? primary.presenceStatus
+            : fallback.presenceStatus,
+      );
+    }
+
+    // Pool all known users from both directory and conversation memberships
+    // so no contact is ever omitted if network pagination is still pending.
+    final allKnownUsers = <String, ChatDirectoryUser>{
+      for (final user in overview.users) user.id: user,
+    };
+    for (final conv in conversations) {
+      for (final member in conv.members) {
+        final existing = allKnownUsers[member.id];
+        if (existing == null) {
+          allKnownUsers[member.id] = member;
+        } else {
+          allKnownUsers[member.id] = mergeUser(existing, member);
+        }
+      }
+    }
+
+    final matchingUsers = <ChatDirectoryUser>[];
     final usersByDepartment = <DepartmentSummary?, List<ChatDirectoryUser>>{};
     final usersByBranch = <BranchSummary?, List<ChatDirectoryUser>>{};
     if (currentFilter != ChatSidebarFilter.rooms &&
         currentFilter != ChatSidebarFilter.favorites &&
         currentFilter != ChatSidebarFilter.archived) {
-      for (final user in overview.users) {
+      for (final user in allKnownUsers.values) {
         if (user.id == currentUserId) {
           continue;
         }
-        final userDepartmentIds = user.departmentIds.isNotEmpty
-            ? user.departmentIds
-            : [if (user.departmentId != null) user.departmentId!];
-        final userDepartments = userDepartmentIds
-            .map((departmentId) => departmentById[departmentId])
-            .whereType<DepartmentSummary>()
-            .toList();
+        final userDepartments = resolveDepartments(user);
         final primaryDepartment = userDepartments.isNotEmpty
             ? userDepartments.first
-            : departmentById[user.departmentId];
-        final branch = branchById[user.branchId];
-        if (!_matchesUserQuery(user, primaryDepartment, query) &&
-            !userDepartments.any(
-              (department) => _matchesUserQuery(user, department, query),
-            )) {
-          final displayName = user.displayName.toLowerCase();
-          final username = user.username.toLowerCase();
-          final branchName = branch?.name.toLowerCase() ?? '';
-          final matchesBranch =
-              query.isEmpty ||
-              displayName.contains(query) ||
-              username.contains(query) ||
-              branchName.contains(query);
-          if (!matchesBranch) {
-            continue;
-          }
+            : null;
+        final branch = resolveBranch(user);
+
+        final isMatch = ChatSearchUtils.matchesUser(
+          user: user,
+          primaryDepartment: primaryDepartment,
+          userDepartments: userDepartments,
+          branch: branch,
+          query: query,
+        );
+
+        if (!isMatch) {
+          continue;
         }
+
+        if (query.isNotEmpty) {
+          matchingUsers.add(user);
+        }
+
         if (userDepartments.isEmpty) {
           usersByDepartment
-              .putIfAbsent(primaryDepartment, () => <ChatDirectoryUser>[])
+              .putIfAbsent(null, () => <ChatDirectoryUser>[])
               .add(user);
         } else {
           for (final department in userDepartments) {
@@ -511,6 +297,9 @@ class ChatSidebar extends ConsumerWidget {
         usersByBranch
             .putIfAbsent(branch, () => <ChatDirectoryUser>[])
             .add(user);
+      }
+      if (matchingUsers.isNotEmpty) {
+        matchingUsers.sort((a, b) => a.displayName.compareTo(b.displayName));
       }
     }
     final orderedDepartmentEntries = [
@@ -541,6 +330,53 @@ class ChatSidebar extends ConsumerWidget {
           usersByBranch[null]!,
         ),
     ];
+
+    // Conversations organized by chronological activity (pinned first, then latest activity)
+    DateTime conversationActivityAt(ChatConversation c) {
+      return c.lastMessage?.createdAt ?? c.updatedAt;
+    }
+
+    int compareConversations(ChatConversation a, ChatConversation b) {
+      if (a.isPinned != b.isPinned) {
+        return a.isPinned ? -1 : 1;
+      }
+      return conversationActivityAt(b).compareTo(conversationActivityAt(a));
+    }
+
+    final matchingConversations = conversations
+        .where((c) => !folderConversationIds.contains(c.id))
+        .where((c) => ChatSearchUtils.matchesConversation(
+              conversation: c,
+              query: query,
+              currentUserId: currentUserId,
+            ))
+        .toList();
+
+    final unarchivedConversations = matchingConversations
+        .where((c) => !c.isArchived)
+        .toList()
+      ..sort(compareConversations);
+
+    final departmentRooms = unarchivedConversations
+        .where((c) => c.type == 'department')
+        .toList();
+
+    final groupConversations = unarchivedConversations
+        .where((c) => c.type == 'group' || c.type == 'broadcast' || c.type == 'department')
+        .toList();
+
+    final directConversations = unarchivedConversations
+        .where((c) => c.type == 'direct')
+        .toList();
+
+    final favoriteConversations = unarchivedConversations
+        .where((c) => c.isFavorite)
+        .toList();
+
+    final archivedConversations = matchingConversations
+        .where((c) => c.isArchived)
+        .toList()
+      ..sort(compareConversations);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -600,6 +436,8 @@ class ChatSidebar extends ConsumerWidget {
                   onOpenProfile: onOpenProfile,
                   onOpenFavoriteMessages: onOpenFavoriteMessages,
                   onToggleTheme: onToggleTheme,
+                  conversations: conversations,
+                  currentUserId: currentUserId,
                 ),
 
                 // ── Search field ────────────────────────────────────────────────
@@ -612,7 +450,7 @@ class ChatSidebar extends ConsumerWidget {
                       color: isDark ? Colors.white : const Color(0xFF1C2B3A),
                     ),
                     decoration: InputDecoration(
-                      hintText: 'بحث',
+                      hintText: 'بحث في المحادثات وجهات الاتصال...',
                       hintStyle: TextStyle(
                         color: isDark
                             ? Colors.white38
@@ -624,6 +462,21 @@ class ChatSidebar extends ConsumerWidget {
                         size: 20,
                         color: appearance.accent,
                       ),
+                      suffixIcon: searchController.text.isNotEmpty
+                          ? IconButton(
+                              tooltip: 'مسح البحث',
+                              icon: Icon(
+                                Icons.close_rounded,
+                                size: 18,
+                                color: isDark
+                                    ? Colors.white54
+                                    : const Color(0xFF708499),
+                              ),
+                              onPressed: () {
+                                searchController.clear();
+                              },
+                            )
+                          : null,
                       filled: true,
                       fillColor: searchFill,
                       contentPadding: const EdgeInsets.symmetric(
@@ -755,6 +608,7 @@ class ChatSidebar extends ConsumerWidget {
                                 padding: const EdgeInsets.only(bottom: 2),
                                 child: ChatFolderInlineItem(
                                   folder: folder,
+                                  unreadBadgeColor: appearance.unreadBadgeColor,
                                   currentUserId: currentUserId,
                                   conversations: folder.conversationIds
                                       .map((id) => conversations.firstWhere(
@@ -786,6 +640,7 @@ class ChatSidebar extends ConsumerWidget {
                                       .toList(),
                                   buildConversation: (c) => ChatListItem(
                                     conversation: c,
+                                    unreadBadgeColor: appearance.unreadBadgeColor,
                                     currentUserId: currentUserId,
                                     typingPreviewText:
                                         typingPreviewByConversationId[c.id],
@@ -801,204 +656,393 @@ class ChatSidebar extends ConsumerWidget {
                                 ),
                               )),
                         const ChatFolderDropZone(),
-                        if (recentConversations.isNotEmpty) ...[
+                        if (query.isNotEmpty && matchingUsers.isNotEmpty) ...[
                           _SidebarSectionHeader(
-                            title: currentFilter == ChatSidebarFilter.direct
-                                ? 'المحادثات المباشرة'
-                                : 'أحدث المحادثات',
-                            subtitle: currentFilter == ChatSidebarFilter.direct
-                                ? 'كل الشاتات المباشرة المتاحة لك.'
-                                : 'أسرع طريق للمحادثات المفتوحة مؤخرًا.',
+                            title: 'الأشخاص وجهات الاتصال (${matchingUsers.length})',
+                            subtitle: 'جهات الاتصال المطابقة لبحثك - انقر للمحادثة المباشرة.',
                             appearance: appearance,
                             isDark: isDark,
                           ),
                           const SizedBox(height: 8),
-                          ...recentConversations.map(
-                            (conversation) => Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: ChatListItem(
-                                conversation: conversation,
-                                currentUserId: currentUserId,
-                                typingPreviewText:
-                                    typingPreviewByConversationId[conversation
-                                        .id],
-                                selected:
-                                    selectedConversationId == conversation.id,
-                                onTap: () =>
-                                    onConversationSelected(conversation),
-                                onTogglePin: () => onTogglePin(conversation),
-                                onToggleMute: () => onToggleMute(conversation),
-                                onToggleArchive: () =>
-                                    onToggleArchive(conversation),
-                                onToggleFavorite: () =>
-                                    onToggleFavorite(conversation),
-                                onDeleteConversation: () =>
-                                    onDeleteConversation(conversation),
+                          ...matchingUsers.map(
+                            (user) => Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: _SidebarUserTile(
+                                user: user,
+                                accent: _departmentAccent(resolveDepartments(user).firstOrNull),
+                                appearance: appearance,
+                                isDark: isDark,
+                                existingConversation: _conversationForUser(user),
+                                onTap: () => onOpenOrStartDirectConversation(user),
                               ),
                             ),
                           ),
                           const SizedBox(height: 14),
                         ],
-                        if (currentFilter != ChatSidebarFilter.direct) ...[
+
+                        // ── Search Mode Conversation Results ───────────────────────
+                        if (query.isNotEmpty && unarchivedConversations.isNotEmpty) ...[
                           _SidebarSectionHeader(
-                            title:
-                                currentFilter == ChatSidebarFilter.departments
-                                ? 'غرف الأقسام'
-                                : currentFilter == ChatSidebarFilter.branches
-                                ? 'الدليل حسب الفروع'
-                                : currentFilter == ChatSidebarFilter.favorites
-                                ? 'المفضلة'
-                                : 'مجموعاتي',
-                            subtitle: currentFilter == ChatSidebarFilter.rooms
-                                ? 'كل الغرف والمجموعات والقنوات التي أنت عضو فيها.'
-                                : currentFilter == ChatSidebarFilter.branches
-                                ? 'كل الموظفين ظاهرون هنا حسب الفروع التي ينشئها الأدمن.'
-                                : currentFilter == ChatSidebarFilter.favorites
-                                ? 'كل المحادثات التي قمت بوضعها في المفضلة.'
-                                : 'المجموعات والغرف والإعلانات الخاصة بك.',
+                            title: 'المحادثات المطابقة (${unarchivedConversations.length})',
+                            subtitle: 'نتائج البحث في المحادثات المفتوحة.',
                             appearance: appearance,
                             isDark: isDark,
                           ),
                           const SizedBox(height: 8),
-                          if (groupedSpaces.isEmpty)
+                          ...unarchivedConversations.map(
+                            (conversation) => Padding(
+                              padding: const EdgeInsets.only(bottom: 2),
+                              child: ChatListItem(
+                                conversation: conversation,
+                                unreadBadgeColor: appearance.unreadBadgeColor,
+                                currentUserId: currentUserId,
+                                typingPreviewText:
+                                    typingPreviewByConversationId[conversation.id],
+                                selected: selectedConversationId == conversation.id,
+                                onTap: () => onConversationSelected(conversation),
+                                onTogglePin: () => onTogglePin(conversation),
+                                onToggleMute: () => onToggleMute(conversation),
+                                onToggleArchive: () => onToggleArchive(conversation),
+                                onToggleFavorite: () => onToggleFavorite(conversation),
+                                onDeleteConversation: () => onDeleteConversation(conversation),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                        ],
+
+                        // ── Regular Filtering (when not searching) ─────────────────
+                        if (query.isEmpty) ...[
+                          // 1. ALL TAB: Unified chronological stream of all conversations (Latest first)
+                          if (currentFilter == ChatSidebarFilter.all) ...[
+                            if (unarchivedConversations.isEmpty)
+                              _SidebarInlineNotice(
+                                label: 'لا توجد محادثات مفتوحة حاليًا. اختر زميلًا من تبويب "مباشر" أو "الأقسام" لبدء محادثة.',
+                                appearance: appearance,
+                                isDark: isDark,
+                              )
+                            else
+                              ...unarchivedConversations.map(
+                                (conversation) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 2),
+                                  child: ChatListItem(
+                                    conversation: conversation,
+                                    unreadBadgeColor: appearance.unreadBadgeColor,
+                                    currentUserId: currentUserId,
+                                    typingPreviewText:
+                                        typingPreviewByConversationId[conversation.id],
+                                    selected: selectedConversationId == conversation.id,
+                                    onTap: () => onConversationSelected(conversation),
+                                    onTogglePin: () => onTogglePin(conversation),
+                                    onToggleMute: () => onToggleMute(conversation),
+                                    onToggleArchive: () => onToggleArchive(conversation),
+                                    onToggleFavorite: () => onToggleFavorite(conversation),
+                                    onDeleteConversation: () => onDeleteConversation(conversation),
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(height: 14),
+                          ],
+
+                          // 2. DIRECT FILTER
+                          if (currentFilter == ChatSidebarFilter.direct) ...[
+                            _SidebarSectionHeader(
+                              title: 'المحادثات المباشرة (${directConversations.length})',
+                              subtitle: 'كل الشاتات المباشرة المتاحة لك.',
+                              appearance: appearance,
+                              isDark: isDark,
+                            ),
+                            const SizedBox(height: 8),
+                            if (directConversations.isEmpty)
+                              _SidebarInlineNotice(
+                                label: 'لا توجد محادثات مباشرة حاليًا. اختر زميلًا من الدليل أدناه لبدء محادثة.',
+                                appearance: appearance,
+                                isDark: isDark,
+                              )
+                            else
+                              ...directConversations.map(
+                                (conversation) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 2),
+                                  child: ChatListItem(
+                                    conversation: conversation,
+                                    unreadBadgeColor: appearance.unreadBadgeColor,
+                                    currentUserId: currentUserId,
+                                    typingPreviewText:
+                                        typingPreviewByConversationId[conversation.id],
+                                    selected: selectedConversationId == conversation.id,
+                                    onTap: () => onConversationSelected(conversation),
+                                    onTogglePin: () => onTogglePin(conversation),
+                                    onToggleMute: () => onToggleMute(conversation),
+                                    onToggleArchive: () => onToggleArchive(conversation),
+                                    onToggleFavorite: () => onToggleFavorite(conversation),
+                                    onDeleteConversation: () => onDeleteConversation(conversation),
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(height: 14),
+                          ],
+
+                          // 3. GROUPS & ROOMS FILTER
+                          if (currentFilter == ChatSidebarFilter.rooms) ...[
+                            _SidebarSectionHeader(
+                              title: 'المجموعات والقنوات (${groupConversations.length})',
+                              subtitle: 'كل الغرف والمجموعات وقنوات الإعلانات المشترك بها.',
+                              appearance: appearance,
+                              isDark: isDark,
+                            ),
+                            const SizedBox(height: 8),
+                            if (groupConversations.isEmpty)
+                              _SidebarInlineNotice(
+                                label: 'لا توجد مجموعات أو غرف مفتوحة حاليًا.',
+                                appearance: appearance,
+                                isDark: isDark,
+                              )
+                            else
+                              ...groupConversations.map(
+                                (conversation) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 2),
+                                  child: ChatListItem(
+                                    conversation: conversation,
+                                    unreadBadgeColor: appearance.unreadBadgeColor,
+                                    currentUserId: currentUserId,
+                                    typingPreviewText:
+                                        typingPreviewByConversationId[conversation.id],
+                                    selected: selectedConversationId == conversation.id,
+                                    onTap: () => onConversationSelected(conversation),
+                                    onTogglePin: () => onTogglePin(conversation),
+                                    onToggleMute: () => onToggleMute(conversation),
+                                    onToggleArchive: () => onToggleArchive(conversation),
+                                    onToggleFavorite: () => onToggleFavorite(conversation),
+                                    onDeleteConversation: () => onDeleteConversation(conversation),
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(height: 14),
+                          ],
+
+                          // 4. DEPARTMENTS FILTER: Official rooms
+                          if (currentFilter == ChatSidebarFilter.departments) ...[
+                            _SidebarSectionHeader(
+                              title: 'غرف الأقسام الرسمية (${departmentRooms.length})',
+                              subtitle: 'الغرف الجماعية الرسمية لأقسام الشركة.',
+                              appearance: appearance,
+                              isDark: isDark,
+                            ),
+                            const SizedBox(height: 8),
+                            if (departmentRooms.isEmpty)
+                              _SidebarInlineNotice(
+                                label: 'لا توجد غرف أقسام مفتوحة حاليًا.',
+                                appearance: appearance,
+                                isDark: isDark,
+                              )
+                            else
+                              ...departmentRooms.map(
+                                (conversation) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 2),
+                                  child: ChatListItem(
+                                    conversation: conversation,
+                                    unreadBadgeColor: appearance.unreadBadgeColor,
+                                    currentUserId: currentUserId,
+                                    typingPreviewText:
+                                        typingPreviewByConversationId[conversation.id],
+                                    selected: selectedConversationId == conversation.id,
+                                    onTap: () => onConversationSelected(conversation),
+                                    onTogglePin: () => onTogglePin(conversation),
+                                    onToggleMute: () => onToggleMute(conversation),
+                                    onToggleArchive: () => onToggleArchive(conversation),
+                                    onToggleFavorite: () => onToggleFavorite(conversation),
+                                    onDeleteConversation: () => onDeleteConversation(conversation),
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(height: 14),
+                          ],
+
+                          // 6. FAVORITES FILTER
+                          if (currentFilter == ChatSidebarFilter.favorites) ...[
+                            _SidebarSectionHeader(
+                              title: 'المفضلة (${favoriteConversations.length})',
+                              subtitle: 'كل المحادثات التي قمت بتمييزها بنجمة.',
+                              appearance: appearance,
+                              isDark: isDark,
+                            ),
+                            const SizedBox(height: 8),
+                            if (favoriteConversations.isEmpty)
+                              _SidebarInlineNotice(
+                                label: 'لا توجد محادثات في المفضلة حاليًا.',
+                                appearance: appearance,
+                                isDark: isDark,
+                              )
+                            else
+                              ...favoriteConversations.map(
+                                (conversation) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 2),
+                                  child: ChatListItem(
+                                    conversation: conversation,
+                                    unreadBadgeColor: appearance.unreadBadgeColor,
+                                    currentUserId: currentUserId,
+                                    typingPreviewText:
+                                        typingPreviewByConversationId[conversation.id],
+                                    selected: selectedConversationId == conversation.id,
+                                    onTap: () => onConversationSelected(conversation),
+                                    onTogglePin: () => onTogglePin(conversation),
+                                    onToggleMute: () => onToggleMute(conversation),
+                                    onToggleArchive: () => onToggleArchive(conversation),
+                                    onToggleFavorite: () => onToggleFavorite(conversation),
+                                    onDeleteConversation: () => onDeleteConversation(conversation),
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(height: 14),
+                          ],
+
+                          // 7. ARCHIVED FILTER
+                          if (currentFilter == ChatSidebarFilter.archived) ...[
+                            _SidebarSectionHeader(
+                              title: 'المحادثات المؤرشفة (${archivedConversations.length})',
+                              subtitle: 'المحادثات التي تم نقلها إلى الأرشيف.',
+                              appearance: appearance,
+                              isDark: isDark,
+                            ),
+                            const SizedBox(height: 8),
+                            if (archivedConversations.isEmpty)
+                              _SidebarInlineNotice(
+                                label: 'لا توجد محادثات مؤرشفة حاليًا.',
+                                appearance: appearance,
+                                isDark: isDark,
+                              )
+                            else
+                              ...archivedConversations.map(
+                                (conversation) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 2),
+                                  child: ChatListItem(
+                                    conversation: conversation,
+                                    unreadBadgeColor: appearance.unreadBadgeColor,
+                                    currentUserId: currentUserId,
+                                    typingPreviewText:
+                                        typingPreviewByConversationId[conversation.id],
+                                    selected: selectedConversationId == conversation.id,
+                                    onTap: () => onConversationSelected(conversation),
+                                    onTogglePin: () => onTogglePin(conversation),
+                                    onToggleMute: () => onToggleMute(conversation),
+                                    onToggleArchive: () => onToggleArchive(conversation),
+                                    onToggleFavorite: () => onToggleFavorite(conversation),
+                                    onDeleteConversation: () => onDeleteConversation(conversation),
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(height: 14),
+                          ],
+                        ],
+
+                        // ── DIRECTORY: DEPARTMENTS ─────────────────────────────────
+                        if (currentFilter == ChatSidebarFilter.departments ||
+                            (currentFilter == ChatSidebarFilter.direct && query.isEmpty)) ...[
+                          _SidebarSectionHeader(
+                            title: 'أقسام وموظفو الشركة (${orderedDepartmentEntries.length})',
+                            subtitle:
+                                'تصفح موظفي الشركة حسب الإدارات والأقسام الرسمية - انقر لبدء محادثة مباشرة.',
+                            appearance: appearance,
+                            isDark: isDark,
+                          ),
+                          const SizedBox(height: 8),
+                          if (orderedDepartmentEntries.isEmpty)
                             _SidebarInlineNotice(
-                              label: currentFilter == ChatSidebarFilter.branches
-                                  ? 'اختر فرعًا أو ابحث عن موظف لعرض نتائج الفروع.'
-                                  : 'لا توجد مجموعات أو غرف مطابقة الآن.',
+                              label: 'لا توجد أقسام مطابقة لنتيجة البحث الحالية.',
                               appearance: appearance,
                               isDark: isDark,
                             )
                           else
-                            ...groupedSpaces.map(
-                              (conversation) => Padding(
-                                padding: const EdgeInsets.only(bottom: 2),
-                                child: ChatListItem(
-                                  conversation: conversation,
-                                  currentUserId: currentUserId,
-                                  typingPreviewText:
-                                      typingPreviewByConversationId[conversation
-                                          .id],
-                                  selected:
-                                      selectedConversationId == conversation.id,
-                                  onTap: () =>
-                                      onConversationSelected(conversation),
-                                  onTogglePin: () => onTogglePin(conversation),
-                                  onToggleMute: () =>
-                                      onToggleMute(conversation),
-                                  onToggleArchive: () =>
-                                      onToggleArchive(conversation),
-                                  onToggleFavorite: () =>
-                                      onToggleFavorite(conversation),
-                                  onDeleteConversation: () =>
-                                      onDeleteConversation(conversation),
+                            ...orderedDepartmentEntries.map((entry) {
+                              final department = entry.key;
+                              final users = [...entry.value]
+                                ..sort(
+                                  (a, b) => a.displayName.compareTo(b.displayName),
+                                );
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: _SidebarDepartmentBlock(
+                                  title: department?.name ?? 'أعضاء بانتظار تخصيص قسم',
+                                  subtitle: department == null
+                                      ? 'أعضاء غير مرتبطين بقسم محدد حاليًا'
+                                      : (department.description.isEmpty
+                                          ? 'قسم ${department.code}'
+                                          : department.description),
+                                  accent: _departmentAccent(department),
+                                  appearance: appearance,
+                                  isDark: isDark,
+                                  users: users,
+                                  membersCount: department?.membersCount ?? users.length,
+                                  initiallyExpanded: query.isNotEmpty,
+                                  conversationForUser: _conversationForUser,
+                                  onUserTap: onOpenOrStartDirectConversation,
                                 ),
-                              ),
-                            ),
-                          if (currentFilter != ChatSidebarFilter.rooms &&
-                              currentFilter != ChatSidebarFilter.branches &&
-                              currentFilter != ChatSidebarFilter.favorites &&
-                              currentFilter != ChatSidebarFilter.archived)
-                            const SizedBox(height: 14),
+                              );
+                            }),
+                          const SizedBox(height: 14),
                         ],
-                        if (currentFilter != ChatSidebarFilter.rooms &&
-                            currentFilter != ChatSidebarFilter.favorites &&
-                            currentFilter != ChatSidebarFilter.archived) ...[
-                          if (currentFilter != ChatSidebarFilter.branches) ...[
-                            _SidebarSectionHeader(
-                              title: 'الأشخاص حسب الأقسام',
-                              subtitle:
-                                  'كل الموظفين ظاهرون هنا حسب الأقسام التي ينشئها الأدمن.',
+
+                        // ── DIRECTORY: BRANCHES ────────────────────────────────────
+                        if (currentFilter == ChatSidebarFilter.branches) ...[
+                          _SidebarSectionHeader(
+                            title: 'فروع وموظفو الشركة (${orderedBranchEntries.length})',
+                            subtitle:
+                                'تصفح موظفي الشركة حسب الفروع والمقرات - انقر للمحادثة المباشرة.',
+                            appearance: appearance,
+                            isDark: isDark,
+                          ),
+                          const SizedBox(height: 8),
+                          if (orderedBranchEntries.isEmpty)
+                            _SidebarInlineNotice(
+                              label: 'لا توجد فروع مطابقة لنتيجة البحث الحالية.',
                               appearance: appearance,
                               isDark: isDark,
-                            ),
-                            const SizedBox(height: 8),
-                            if (orderedDepartmentEntries.isEmpty)
-                              _SidebarInlineNotice(
-                                label:
-                                    'لا يوجد أشخاص مطابقون لنتيجة البحث الحالية.',
-                                appearance: appearance,
-                                isDark: isDark,
-                              )
-                            else
-                              ...orderedDepartmentEntries.map((entry) {
-                                final department = entry.key;
-                                final users = [...entry.value]
-                                  ..sort(
-                                    (a, b) =>
-                                        a.displayName.compareTo(b.displayName),
-                                  );
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 10),
-                                  child: _SidebarDepartmentBlock(
-                                    title: department?.name ?? 'بدون قسم',
-                                    subtitle: department == null
-                                        ? 'أشخاص غير مرتبطين بقسم محدد'
-                                        : (department.description.isEmpty
-                                              ? 'قسم ${department.code}'
-                                              : department.description),
-                                    accent: _departmentAccent(department),
-                                    appearance: appearance,
-                                    isDark: isDark,
-                                    users: users,
-                                    membersCount:
-                                        department?.membersCount ??
-                                        users.length,
-                                    conversationForUser: _conversationForUser,
-                                    onUserTap: onOpenOrStartDirectConversation,
-                                  ),
+                            )
+                          else
+                            ...orderedBranchEntries.map((entry) {
+                              final branch = entry.key;
+                              final users = [...entry.value]
+                                ..sort(
+                                  (a, b) => a.displayName.compareTo(b.displayName),
                                 );
-                              }),
-                            const SizedBox(height: 14),
-                          ],
-                          if (currentFilter !=
-                              ChatSidebarFilter.departments) ...[
-                            _SidebarSectionHeader(
-                              title: 'الأشخاص حسب الفروع',
-                              subtitle:
-                                  'كل الموظفين ظاهرون هنا حسب الفروع التي ينشئها الأدمن.',
-                              appearance: appearance,
-                              isDark: isDark,
-                            ),
-                            const SizedBox(height: 8),
-                            if (orderedBranchEntries.isEmpty)
-                              _SidebarInlineNotice(
-                                label:
-                                    'لا يوجد أشخاص مطابقون لنتيجة البحث الحالية.',
-                                appearance: appearance,
-                                isDark: isDark,
-                              )
-                            else
-                              ...orderedBranchEntries.map((entry) {
-                                final branch = entry.key;
-                                final users = [...entry.value]
-                                  ..sort(
-                                    (a, b) =>
-                                        a.displayName.compareTo(b.displayName),
-                                  );
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 10),
-                                  child: _SidebarDepartmentBlock(
-                                    title: branch?.name ?? 'بدون فرع',
-                                    subtitle: branch == null
-                                        ? 'أشخاص غير مرتبطين بفرع محدد'
-                                        : (branch.description.isEmpty
-                                              ? 'فرع ${branch.code}'
-                                              : branch.description),
-                                    accent: _branchAccent(branch),
-                                    appearance: appearance,
-                                    isDark: isDark,
-                                    users: users,
-                                    membersCount:
-                                        branch?.membersCount ?? users.length,
-                                    conversationForUser: _conversationForUser,
-                                    onUserTap: onOpenOrStartDirectConversation,
-                                  ),
-                                );
-                              }),
-                          ],
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: _SidebarDepartmentBlock(
+                                  title: branch?.name ?? 'أعضاء بانتظار تخصيص فرع',
+                                  subtitle: branch == null
+                                      ? 'أعضاء غير مرتبطين بفرع محدد حاليًا'
+                                      : (branch.description.isEmpty
+                                          ? 'فرع ${branch.code}'
+                                          : branch.description),
+                                  accent: _branchAccent(branch),
+                                  appearance: appearance,
+                                  isDark: isDark,
+                                  users: users,
+                                  membersCount: branch?.membersCount ?? users.length,
+                                  initiallyExpanded: query.isNotEmpty,
+                                  conversationForUser: _conversationForUser,
+                                  onUserTap: onOpenOrStartDirectConversation,
+                                ),
+                              );
+                            }),
+                          const SizedBox(height: 14),
                         ],
-                        if (recentConversations.isEmpty &&
-                            groupedSpaces.isEmpty &&
+
+                        if (query.isNotEmpty &&
+                            unarchivedConversations.isEmpty &&
+                            matchingUsers.isEmpty &&
+                            orderedDepartmentEntries.isEmpty &&
+                            orderedBranchEntries.isEmpty)
+                          _SidebarInlineNotice(
+                            label: 'لم يتم العثور على أي نتائج مطابقة لـ "$query".',
+                            appearance: appearance,
+                            isDark: isDark,
+                          )
+                        else if (query.isEmpty &&
+                            currentFilter != ChatSidebarFilter.all &&
+                            departmentRooms.isEmpty &&
+                            groupConversations.isEmpty &&
+                            directConversations.isEmpty &&
                             orderedDepartmentEntries.isEmpty &&
                             orderedBranchEntries.isEmpty)
                           _SidebarInlineNotice(
@@ -1190,6 +1234,16 @@ class _CompactChatSidebar extends StatelessWidget {
                   onPressed: onCreateConversation,
                 ),
                 const SizedBox(height: 6),
+                Consumer(
+                  builder: (context, ref, _) => _CompactSidebarIconButton(
+                    tooltip: 'الحافظة المشتركة الفورية (الكمبيوتر ⇄ الموبايل)',
+                    icon: Icons.content_paste_go_rounded,
+                    color: isDark ? Colors.white70 : const Color(0xFF708499),
+                    onPressed: () =>
+                        showDesktopInstantClipboardSyncDialog(context, ref),
+                  ),
+                ),
+                const SizedBox(height: 6),
                 _CompactSidebarIconButton(
                   tooltip: 'الرسائل المفضلة',
                   icon: Icons.star_outline_rounded,
@@ -1229,6 +1283,7 @@ class _CompactChatSidebar extends StatelessWidget {
                     currentUserId: currentUserId,
                     selected: selectedConversationId == conversation.id,
                     accent: appearance.accent,
+                    unreadBadgeColor: appearance.unreadBadgeColor,
                     onTap: () => onConversationSelected(conversation),
                   );
                 },
@@ -1276,6 +1331,7 @@ class _CompactConversationAvatar extends StatelessWidget {
     required this.currentUserId,
     required this.selected,
     required this.accent,
+    this.unreadBadgeColor,
     required this.onTap,
   });
 
@@ -1283,6 +1339,7 @@ class _CompactConversationAvatar extends StatelessWidget {
   final String currentUserId;
   final bool selected;
   final Color accent;
+  final Color? unreadBadgeColor;
   final VoidCallback onTap;
 
   @override
@@ -1344,7 +1401,7 @@ class _CompactConversationAvatar extends StatelessWidget {
                     vertical: 2,
                   ),
                   decoration: BoxDecoration(
-                    color: accent,
+                    color: unreadBadgeColor ?? const Color(0xFFE53935),
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(
                       color: Theme.of(context).colorScheme.surface,
@@ -1386,8 +1443,12 @@ class _SidebarHeader extends ConsumerWidget {
     required this.onOpenProfile,
     required this.onOpenFavoriteMessages,
     required this.onToggleTheme,
+    this.conversations = const [],
+    this.currentUserId,
   });
 
+  final List<ChatConversation> conversations;
+  final String? currentUserId;
   final String userLabel;
   final int unreadTotal;
   final bool canOpenAdmin;
@@ -1513,43 +1574,27 @@ class _SidebarHeader extends ConsumerWidget {
               ),
               const SizedBox(width: 6),
               _TgIconButton(
-                tooltip: 'إنشاء مجلد',
+                tooltip: 'إنشاء مجلد محادثات',
                 icon: Icons.create_new_folder_rounded,
                 isDark: isDark,
                 accentColor: appearance.accent,
                 onPressed: () {
-                  showDialog(
-                    context: context,
-                    builder: (context) {
-                      final controller = TextEditingController();
-                      return AlertDialog(
-                        title: const Text('مجلد جديد'),
-                        content: TextField(
-                          controller: controller,
-                          decoration:
-                              const InputDecoration(hintText: 'اسم المجلد'),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text('إلغاء'),
-                          ),
-                          TextButton(
-                            onPressed: () {
-                              if (controller.text.isNotEmpty) {
-                                ref
-                                    .read(chatFoldersProvider.notifier)
-                                    .createFolder(controller.text.trim());
-                              }
-                              Navigator.pop(context);
-                            },
-                            child: const Text('إنشاء'),
-                          ),
-                        ],
-                      );
-                    },
+                  showCreateOrEditChatFolderDialog(
+                    context,
+                    availableConversations: conversations,
+                    currentUserId: currentUserId,
                   );
                 },
+                dense: true,
+              ),
+              const SizedBox(width: 6),
+              _TgIconButton(
+                tooltip: 'الحافظة المشتركة الفورية (الكمبيوتر ⇄ الموبايل)',
+                icon: Icons.content_paste_go_rounded,
+                isDark: isDark,
+                accentColor: appearance.accent,
+                onPressed: () =>
+                    showDesktopInstantClipboardSyncDialog(context, ref),
                 dense: true,
               ),
               const SizedBox(width: 6),
@@ -1877,6 +1922,7 @@ class _SidebarDepartmentBlock extends StatelessWidget {
     required this.membersCount,
     required this.conversationForUser,
     required this.onUserTap,
+    this.initiallyExpanded = false,
   });
 
   final String title;
@@ -1888,6 +1934,7 @@ class _SidebarDepartmentBlock extends StatelessWidget {
   final int membersCount;
   final ChatConversation? Function(ChatDirectoryUser user) conversationForUser;
   final ValueChanged<ChatDirectoryUser> onUserTap;
+  final bool initiallyExpanded;
 
   @override
   Widget build(BuildContext context) {
@@ -1905,9 +1952,10 @@ class _SidebarDepartmentBlock extends StatelessWidget {
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
+          key: PageStorageKey<String>('dept_${title}_$initiallyExpanded'),
           tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
           childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-          initiallyExpanded: false,
+          initiallyExpanded: initiallyExpanded,
           leading: CircleAvatar(
             radius: 18,
             backgroundColor: accent.withValues(alpha: 0.14),
@@ -2033,19 +2081,28 @@ class _SidebarUserTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      user.displayName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                        color: isDark ? Colors.white : const Color(0xFF1C2B3A),
+                    Tooltip(
+                      message: user.jobTitle.trim().isNotEmpty
+                          ? '${user.displayName}\n💼 ${user.jobTitle.trim()}'
+                          : (user.branchCode.isNotEmpty
+                              ? '${user.displayName} • فرع ${user.branchCode}'
+                              : user.displayName),
+                      child: Text(
+                        user.displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: isDark ? Colors.white : const Color(0xFF1C2B3A),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '@${user.username} • ${formatPresenceLabel(user)}',
+                      user.jobTitle.trim().isNotEmpty
+                          ? '${user.jobTitle.trim()} • ${formatPresenceLabel(user)}'
+                          : '@${user.username} • ${formatPresenceLabel(user)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -2093,21 +2150,6 @@ String _firstCharacter(String value) {
   return trimmed.substring(0, 1);
 }
 
-bool _matchesUserQuery(
-  ChatDirectoryUser user,
-  DepartmentSummary? department,
-  String query,
-) {
-  if (query.isEmpty) {
-    return true;
-  }
-  final displayName = user.displayName.toLowerCase();
-  final username = user.username.toLowerCase();
-  final departmentName = department?.name.toLowerCase() ?? '';
-  return displayName.contains(query) ||
-      username.contains(query) ||
-      departmentName.contains(query);
-}
 
 Color _departmentAccent(DepartmentSummary? department) {
   const palette = <Color>[

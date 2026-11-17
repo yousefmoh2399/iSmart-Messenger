@@ -1272,12 +1272,15 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      // Row 1: Title + Paper size pill + Drag indicator
+                                      // Row 1: Title + Drag indicator
                                       Row(
                                         children: [
                                           Expanded(
                                             child: Text(
                                               'الصفحة ${index + 1}',
+                                              maxLines: 1,
+                                              softWrap: false,
+                                              overflow: TextOverflow.ellipsis,
                                               style: Theme.of(context)
                                                   .textTheme
                                                   .titleMedium
@@ -1287,6 +1290,46 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
                                                   ),
                                             ),
                                           ),
+                                          Icon(
+                                            Icons.drag_indicator_rounded,
+                                            size: 20,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurfaceVariant
+                                                .withValues(alpha: 0.45),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+
+                                      // Row 2: Timestamp & Paper size selector pill
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.schedule_rounded,
+                                            size: 13,
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.onSurfaceVariant,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Expanded(
+                                            child: Text(
+                                              formatDate(page.createdAt),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(
+                                                    fontSize: 11.5,
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .onSurfaceVariant,
+                                                  ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
                                           // Compact Paper Size Selector Pill
                                           PopupMenuButton<DocumentPaperSize>(
                                             enabled: !_isSavingSession,
@@ -1333,8 +1376,8 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
                                             child: Container(
                                               padding:
                                                   const EdgeInsets.symmetric(
-                                                    horizontal: 9,
-                                                    vertical: 4,
+                                                    horizontal: 8,
+                                                    vertical: 3,
                                                   ),
                                               decoration: BoxDecoration(
                                                 color: palette.accent
@@ -1351,12 +1394,12 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
                                                 children: [
                                                   Icon(
                                                     Icons.aspect_ratio_rounded,
-                                                    size: 13,
+                                                    size: 12,
                                                     color: palette.accent,
                                                   ),
                                                   const SizedBox(width: 4),
                                                   Text(
-                                                    page.paperSize.label,
+                                                    page.paperSize.shortLabel,
                                                     style: TextStyle(
                                                       fontSize: 11,
                                                       fontWeight:
@@ -1367,48 +1410,12 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
                                                   Icon(
                                                     Icons
                                                         .arrow_drop_down_rounded,
-                                                    size: 16,
+                                                    size: 15,
                                                     color: palette.accent,
                                                   ),
                                                 ],
                                               ),
                                             ),
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Icon(
-                                            Icons.drag_indicator_rounded,
-                                            size: 20,
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .onSurfaceVariant
-                                                .withValues(alpha: 0.45),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 4),
-
-                                      // Row 2: Timestamp & Filter info
-                                      Row(
-                                        children: [
-                                          Icon(
-                                            Icons.schedule_rounded,
-                                            size: 13,
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onSurfaceVariant,
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            formatDate(page.createdAt),
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .bodySmall
-                                                ?.copyWith(
-                                                  fontSize: 11.5,
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .onSurfaceVariant,
-                                                ),
                                           ),
                                         ],
                                       ),

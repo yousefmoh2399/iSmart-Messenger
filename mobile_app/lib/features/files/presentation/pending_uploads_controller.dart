@@ -3,23 +3,39 @@ import '../../../shared/models/pending_upload.dart';
 import '../../../shared/providers/providers.dart';
 
 class PendingUploadsController extends AsyncNotifier<List<PendingUpload>> {
-  void resetState() { state = const AsyncLoading(); }
+  void resetState() {
+    state = const AsyncLoading();
+  }
+
   bool _isSyncing = false;
 
   @override
   Future<List<PendingUpload>> build() async {
-    return ref.read(localDocumentStoreProvider).loadPendingUploads();
+    return ref.read(localDocumentStoreProvider).loadAllLocalDocuments();
   }
 
   Future<void> refresh() async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(
-      () => ref.read(localDocumentStoreProvider).loadPendingUploads(),
+      () => ref.read(localDocumentStoreProvider).loadAllLocalDocuments(),
     );
   }
 
-  Future<void> removeById(String id) async {
-    await ref.read(localDocumentStoreProvider).removePendingUpload(id);
+  Future<PendingUpload> importLocalPdf({
+    required String sourcePath,
+    String? fileName,
+  }) async {
+    final imported = await ref
+        .read(localDocumentStoreProvider)
+        .importLocalPdfFile(sourcePath: sourcePath, fileName: fileName);
+    await refresh();
+    return imported;
+  }
+
+  Future<void> removeById(String id, {String? filePath}) async {
+    await ref
+        .read(localDocumentStoreProvider)
+        .deleteLocalDocument(id, filePath: filePath);
     await refresh();
   }
 
@@ -56,8 +72,3 @@ class PendingUploadsController extends AsyncNotifier<List<PendingUpload>> {
     }
   }
 }
-
-
-
-
-

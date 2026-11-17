@@ -179,6 +179,30 @@ class DesktopFileSaveService {
         mimeType,
         downloadUrl: payload['downloadUrl']?.toString(),
       );
+
+      String? targetSavePath;
+      if (preferredDirectoryPath?.trim().isNotEmpty != true &&
+          web_bridge.isElectron()) {
+        // Prompt user for save path FIRST so they don't wait for download,
+        // and if they cancel, we don't do unnecessary work.
+        onProgress?.call(
+          stage: 'prompting',
+          progress: 0.05,
+          message: 'بانتظار تحديد مسار الحفظ على الكمبيوتر...',
+        );
+        targetSavePath = await web_bridge.pickElectronSavePath(
+          defaultFileName: safeName,
+          title: 'حفظ الملف الوارد',
+        );
+        if (targetSavePath == null || targetSavePath.trim().isEmpty) {
+          return const DesktopFileSaveResult(
+            success: false,
+            message: 'تم إلغاء الحفظ بواسطة المستخدم.',
+            savedPath: null,
+          );
+        }
+      }
+
       final inlineFileBase64 =
           payload['inlineFileBase64']?.toString().trim() ?? '';
       if (inlineFileBase64.isNotEmpty) {
@@ -187,11 +211,23 @@ class DesktopFileSaveService {
           progress: 0.25,
           message: 'جاري تجهيز الملف الوارد...',
         );
-        await web_bridge.downloadBytes(
+        final saved = await web_bridge.downloadBytes(
           bytes: base64Decode(inlineFileBase64),
           fileName: safeName,
           mimeType: mimeType,
           preferredDirectoryPath: preferredDirectoryPath,
+          targetFilePath: targetSavePath,
+        );
+        onProgress?.call(
+          stage: 'completed',
+          progress: 1,
+          message: 'تم حفظ الملف على الكمبيوتر بنجاح.',
+          savedPath: saved ?? targetSavePath ?? safeName,
+        );
+        return DesktopFileSaveResult(
+          success: true,
+          message: 'تم حفظ الملف على الكمبيوتر بنجاح.',
+          savedPath: saved ?? targetSavePath ?? safeName,
         );
       } else {
         final downloadUrl = payload['downloadUrl']?.toString().trim() ?? '';
@@ -217,25 +253,25 @@ class DesktopFileSaveService {
             );
           },
         );
-        await web_bridge.downloadBytes(
+        final saved = await web_bridge.downloadBytes(
           bytes: bytes,
           fileName: safeName,
           mimeType: mimeType,
           preferredDirectoryPath: preferredDirectoryPath,
+          targetFilePath: targetSavePath,
+        );
+        onProgress?.call(
+          stage: 'completed',
+          progress: 1,
+          message: 'تم حفظ الملف على الكمبيوتر بنجاح.',
+          savedPath: saved ?? targetSavePath ?? safeName,
+        );
+        return DesktopFileSaveResult(
+          success: true,
+          message: 'تم حفظ الملف على الكمبيوتر بنجاح.',
+          savedPath: saved ?? targetSavePath ?? safeName,
         );
       }
-      onProgress?.call(
-        stage: 'completed',
-        progress: 1,
-        message: 'تم تجهيز الملف للتنزيل من المتصفح.',
-        savedPath: safeName,
-      );
-      return DesktopFileSaveResult(
-        success: true,
-        message:
-            'تم تجهيز الملف للتنزيل. المتصفح سيحفظه حسب إعدادات التنزيل عند المستخدم.',
-        savedPath: safeName,
-      );
     } catch (error) {
       return DesktopFileSaveResult(
         success: false,

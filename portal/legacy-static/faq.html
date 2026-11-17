@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>مركز الدعم الفني والأسئلة الشائعة | iSmart Messenger</title>
+    <meta
+      name="description"
+      content="إجابات وحلول لكافة المشاكل التقنية والاستفسارات الشائعة لموظفي ومديري الـ 50 فرعاً."
+    />
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="icon" type="image/png" href="assets/images/logo.png" />
+  </head>
+  <body>
+    <!-- Top Strip -->
+    <div class="top-strip">
+      <div class="container top-strip-inner">
+        <span>مركز المساعدة والدعم الفني المعتمد</span>
+      </div>
+    </div>
+
+    <!-- Navigation -->
+    <header class="site-nav">
+      <div class="container nav-container">
+        <a href="index.html" class="nav-brand">
+          <img
+            src="assets/images/logo.png"
+            alt="iSmart Logo"
+            onerror="this.src = 'assets/images/server-online.png'"
+          />
+          <div class="nav-brand-text">
+            <h1>iSmart Messenger</h1>
+            <span>نظام الاتصال الموحد للفروع</span>
+          </div>
+        </a>
+
+        <ul class="nav-links" id="navLinks">
+          <li class="nav-item"><a href="index.html">الرئيسية</a></li>
+          <li class="nav-item"><a href="windows.html">دليل الكمبيوتر</a></li>
+          <li class="nav-item"><a href="mobile.html">دليل الموبايل</a></li>
+          <li class="nav-item">
+            <a href="index.html#videos-section">فيديوهات الشرح</a>
+          </li>
+          <li class="nav-item">
+            <a href="faq.html" class="active">الدعم الفني</a>
+          </li>
+        </ul>
+
+        <div
+          style="display: flex; align-items: center; gap: 10px; flex-shrink: 0"
+        >
+          <a href="index.html#downloads" class="nav-cta-btn">
+            <span>التحميلات</span>
+          </a>
+          <button class="mobile-toggle" id="mobileToggle">&#9776;</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Doc Hero -->
+    <section class="doc-hero">
+      <div class="container">
+        <h2>مركز الدعم الفني والأسئلة الشائعة للفروع</h2>
+        <p>
+          دليلك المعتمد لحل كافة الاستفسارات والمشاكل التقنية التي قد تواجهك
+          أثناء تشغيل برنامج المراسلات في فرعك.
+        </p>
+      </div>
+    </section>
+
+    <!-- Main Content -->
+    <main class="doc-layout">
+      <div class="container">
+        <div class="faq-wrap">
+          <!-- Question 1 -->
+          <div class="faq-row active">
+            <div class="faq-q">
+              1. كيف أحصل على اسم المستخدم وكلمة المرور الخاصة بي؟
+            </div>
+            <div class="faq-a">
+              تتولى إدارة تكنولوجيا المعلومات (IT) في المقر الرئيسي إنشاء وتفعيل
+              حسابات جميع الموظفين في الـ 50 فرعاً بشكل مركزي ومسبق. يمكنك
+              استلام بيانات حسابك من مدير الفرع، أو التواصل مع مسؤول الـ IT
+              لتزويدك بالبيانات فور تثبيت البرنامج.
+            </div>
+          </div>
+
+          <!-- Question 2 -->
+          <div class="faq-row">
+            <div class="faq-q">
+              2. يظهر تنبيه "تعذر الاتصال بالخادم" (Server Connection Failed)؟
+            </div>
+            <div class="faq-a">
+              يرجى مراجعة الخطوات التالية بالترتيب:
+              <ul style="margin-right: 20px; margin-top: 8px; line-height: 1.8">
+                <li>
+                  تأكد من أن جهازك متصل بالإنترنت وأن شبكة الفرع تعمل بشكل
+                  طبيعي.
+                </li>
+                <li>
+                  إذا كان خادم الشركة يعمل داخل شبكة خاصة، تأكد من تشغيل الـ VPN
+                  الخاص بالشركة أولاً.
+                </li>
+                <li>
+                  تأكد من كتابة عنوان السيرفر والمنفذ كاملاً مثل:
+                  <code>http://192.168.1.100:7070</code> دون مسافات إضافية.
+                </li>
+                <li>
+                  تأكد من أن جدار حماية الويندوز (Firewall) لا يحظر الاتصال
+                  بالمنفذ 7070.
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- Question 3 -->
+          <div class="faq-row">
+            <div class="faq-q">
+              3. إشعارات الموبايل لا تصلني إلا عندما أفتح التطبيق فقط؟
+            </div>
+            <div class="faq-a">
+              تقوم بعض هواتف الأندرويد (خصوصاً شاومي، هواوي، وسامسونج) بإيقاف
+              التطبيقات في الخلفية لتوفير البطارية. لحل المشكلة نهائياً:
+              <ol style="margin-right: 20px; margin-top: 8px; line-height: 1.8">
+                <li>
+                  ادخل إلى
+                  <strong
+                    >إعدادات الهاتف -> التطبيقات -> iSmart Messenger</strong
+                  >.
+                </li>
+                <li>
+                  اختر <strong>البطارية (Battery)</strong> واجعلها
+                  <strong>بدون قيود (Unrestricted)</strong>.
+                </li>
+                <li>
+                  فعل ميزة <strong>التشغيل التلقائي (Autostart)</strong> إذا كان
+                  هاتفك يدعمها.
+                </li>
+                <li>تأكد من تفعيل صلاحيات الإشعارات والصوت في شاشة القفل.</li>
+              </ol>
+            </div>
+          </div>
+
+          <!-- Question 4 -->
+          <div class="faq-row">
+            <div class="faq-q">
+              4. ما هو أقصى حجم مسموح به لإرسال الملفات والمستندات؟
+            </div>
+            <div class="faq-a">
+              يدعم نظام iSmart Messenger إرسال مستندات العمل الكبيرة (PDF، جداول
+              Excel، صور عالية الجودة) حتى 100 ميجابايت لكل ملف بشكل قياسي، مع
+              الحفاظ الكامل على الجودة دون أي ضغط يشوه البيانات.
+            </div>
+          </div>
+
+          <!-- Question 5 -->
+          <div class="faq-row">
+            <div class="faq-q">
+              5. هل يمكنني استخدام البرنامج من المنزل أو خارج الفرع؟
+            </div>
+            <div class="faq-a">
+              نعم، طالما كان لديك اتصال بالإنترنت أو قمت بالاتصال بشبكة الشركة
+              المؤمنة (VPN) بحسب سياسة الأمان المتبعة في إدارتك. كما يمكنك
+              استخدام تطبيق الموبايل في أي وقت لاستقبال إشعارات العمل العاجلة.
+            </div>
+          </div>
+
+          <!-- Question 6 -->
+          <div class="faq-row">
+            <div class="faq-q">6. كيف أغير كلمة المرور الخاصة بحسابي؟</div>
+            <div class="faq-a">
+              من داخل البرنامج، اضغط على صورتك الشخصية أو خيار الإعدادات
+              (Settings)، ثم اختر
+              <strong>"تغيير كلمة المرور" (Change Password)</strong>، واكتب كلمة
+              المرور الحالية ثم الجديدة. أو يمكنك طلب إعادة تعيين كلمة المرور من
+              مسؤول النظام (Server Admin).
+            </div>
+          </div>
+
+          <!-- Question 7 -->
+          <div class="faq-row">
+            <div class="faq-q">7. قنوات التواصل مع الدعم الفني المركزي</div>
+            <div class="faq-a">
+              فريق تكنولوجيا المعلومات جاهز لمساعدة جميع الـ 50 فرعاً عبر
+              القنوات التالية:
+              <ul style="margin-right: 20px; margin-top: 8px">
+                <li>
+                  📧 البريد الإلكتروني:
+                  <code>support@ismart-messenger.local</code>
+                </li>
+                <li>
+                  📞 الهاتف الداخلي للـ IT: تحويلة <strong>101</strong> أو
+                  <strong>102</strong>
+                </li>
+                <li>
+                  💬 محادثة مباشرة: راسل حساب <strong>IT Support</strong> مباشرة
+                  من داخل البرنامج.
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="site-footer-apple">
+      <div class="container">
+        <ul class="footer-nav">
+          <li><a href="index.html">الرئيسية والتحميل</a></li>
+          <li><a href="windows.html">دليل الكمبيوتر</a></li>
+          <li><a href="mobile.html">دليل الموبايل</a></li>
+          <li><a href="faq.html">الدعم الفني</a></li>
+        </ul>
+        <p>
+          جميع الحقوق محفوظة &copy; 2026 iSmart Messenger Network — مركز الدعم
+          الفني لشبكة الـ 50 فرعاً.
+        </p>
+      </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+  </body>
+</html>

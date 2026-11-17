@@ -1,19 +1,25 @@
 const fs = require("fs");
 const path = require("path");
 
+const resolvedExecutableCache = new Map();
+
 /**
  * Returns the path to a bundled executable if it exists next to the binary,
  * otherwise returns the executable name to rely on the system PATH.
  */
 function getBundledExecutable(name) {
+  if (resolvedExecutableCache.has(name)) {
+    return resolvedExecutableCache.get(name);
+  }
+
   const executableName = process.platform === "win32" ? `${name}.exe` : name;
-  
+
   // If we are running from a pkg binary, process.execPath is the path to the executable.
   // Otherwise, it's the node binary.
   // If we are bundled, we expect a "bin" folder next to the executable or in the project root.
-  
+
   let searchPaths = [];
-  
+
   if (process.pkg) {
     const execDir = path.dirname(process.execPath);
     searchPaths.push(path.join(execDir, "bin", executableName));
@@ -30,12 +36,12 @@ function getBundledExecutable(name) {
 
   for (const checkPath of searchPaths) {
     if (fs.existsSync(checkPath)) {
-      console.log(`[EXECUTABLE_RESOLVER] Resolved bundled executable ${name} to: ${checkPath}`);
+      resolvedExecutableCache.set(name, checkPath);
       return checkPath;
     }
   }
 
-  console.log(`[EXECUTABLE_RESOLVER] Bundled executable ${name} not found in bin/ folders. Falling back to system PATH: ${executableName}`);
+  resolvedExecutableCache.set(name, executableName);
   return executableName;
 }
 

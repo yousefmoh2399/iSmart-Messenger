@@ -13,6 +13,9 @@ Future<void> main() async {
   await runZonedGuarded<Future<void>>(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
+      // Optimize image memory cache limits for low-spec systems (e.g. Windows 7).
+      PaintingBinding.instance.imageCache.maximumSize = 100;
+      PaintingBinding.instance.imageCache.maximumSizeBytes = 40 * 1024 * 1024;
       final defaultFlutterErrorHandler = FlutterError.onError;
       FlutterError.onError = (details) {
         if (_isDisposedEngineViewError(details.exception)) {
