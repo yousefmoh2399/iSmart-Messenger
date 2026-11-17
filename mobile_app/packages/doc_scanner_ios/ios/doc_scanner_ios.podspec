@@ -14,5 +14,5 @@ Native document scanner using AVFoundation, Vision, and CoreImage.
   s.platform         = :ios, '15.0'
   s.swift_version    = '5.0'
 
-  s.frameworks       = 'AVFoundation', 'Vision', 'CoreImage', 'CoreMedia', 'ImageIO', 'UIKit', 'Metal'
+  s.frameworks       = 'AVFoundation', 'Vision', 'CoreImage', 'CoreMedia', 'ImageIO', 'UIKit', 'Metal', 'PhotosUI'
 end

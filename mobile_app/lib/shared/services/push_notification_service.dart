@@ -9,13 +9,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/network/api_client.dart';
 import '../../features/auth/data/auth_repository.dart';
+import '../../firebase_options.dart';
 import 'local_notification_service.dart';
 import 'permission_request_coordinator.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   try {
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
   } catch (_) {}
 }
 
@@ -54,7 +57,9 @@ class PushNotificationService {
     }
 
     try {
-      await Firebase.initializeApp();
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
       _firebaseReady = true;
     } catch (_) {
       _firebaseReady = false;
@@ -115,11 +120,19 @@ class PushNotificationService {
     if (!_firebaseReady) {
       return;
     }
-    final token = await FirebaseMessaging.instance.getToken();
-    if (token == null || token.trim().isEmpty) {
-      return;
-    }
-    await _registerToken(token);
+    try {
+      if (Platform.isIOS) {
+        final apnsToken = await FirebaseMessaging.instance.getAPNSToken();
+        if (apnsToken == null) {
+          await Future<void>.delayed(const Duration(seconds: 2));
+        }
+      }
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token == null || token.trim().isEmpty) {
+        return;
+      }
+      await _registerToken(token);
+    } catch (_) {}
   }
 
   Future<void> unregisterCurrentDevice() async {
@@ -127,7 +140,10 @@ class PushNotificationService {
     if (!_firebaseReady) {
       return;
     }
-    final token = await FirebaseMessaging.instance.getToken();
+    String? token;
+    try {
+      token = await FirebaseMessaging.instance.getToken();
+    } catch (_) {}
     if (token == null || token.trim().isEmpty) {
       return;
     }

@@ -2083,7 +2083,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       return 'معرض الصور (Workplace Chat)';
     }
 
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid || Platform.isIOS) {
       final bytes = await sourceFile.readAsBytes();
       final savedPath = await FilePicker.platform.saveFile(
         dialogTitle: 'اختر مكان حفظ الملف',

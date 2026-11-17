@@ -152,6 +152,28 @@ Rotates an image 90 degrees counter-clockwise and writes the result. (Used prima
 
 ---
 
+### `compositeSignature`
+Composites a transparent PNG signature onto a page JPEG using native platform Canvas (`android.graphics.Canvas` on Android, `UIGraphicsImageRenderer` on iOS), capping the output's longer dimension at `maxSide` (default `2048px`) so `PdfBuilderService` hits its 0ms fast path.
+
+#### Arguments:
+| Key | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `pagePath` | `String` | Yes | - | Absolute path to the page JPEG. |
+| `signatureBytes` | `Uint8List` | Yes | - | Raw PNG bytes of the signature. |
+| `relX` | `Double` | No | `0.05` | Relative horizontal offset `[0.0 .. 1.0]`. |
+| `relY` | `Double` | No | `0.70` | Relative vertical offset `[0.0 .. 1.0]`. |
+| `relW` | `Double` | No | `0.40` | Relative signature width `[0.0 .. 1.0]`. |
+| `maxSide` | `Int` | No | `2048` | Maximum output pixel dimension. |
+
+#### Return Value:
+- `Uint8List` containing the composited JPEG (quality 92, EXIF orientation 1).
+
+#### Error Codes:
+- `INVALID_ARGS`: Missing `pagePath` or `signatureBytes`.
+- `COMPOSITE_ERROR`: Decoding or rendering failure.
+
+---
+
 ## 3. Filter Specifications & Final Reference Constants
 
 | Filter Name | Aliases | Pipeline / Formula | Reference Constants |

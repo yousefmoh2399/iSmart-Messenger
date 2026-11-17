@@ -808,7 +808,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       );
 
       final useSystemSaveDialog =
-          Platform.isAndroid &&
+          (Platform.isAndroid || Platform.isIOS) &&
           saveTarget == _IncomingFileSaveTarget.chooseLocation;
       String targetDirectory;
       if (saveTarget == _IncomingFileSaveTarget.chooseLocation &&
@@ -1129,6 +1129,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     String? deviceUid,
     required bool isMandatory,
   }) {
+    if (Platform.isIOS) {
+      return;
+    }
     if (_isUpdateDialogOpen) {
       return;
     }

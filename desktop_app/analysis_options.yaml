@@ -15,6 +15,11 @@ analyzer:
     unused_field: ignore
     unnecessary_import: ignore
     unnecessary_null_comparison: ignore
+  exclude:
+    - build/**
+    - web/**
+    - windows/**
+    - linux/**
 include: package:flutter_lints/flutter.yaml
 
 linter:

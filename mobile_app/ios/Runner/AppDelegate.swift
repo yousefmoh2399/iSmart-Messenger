@@ -1,6 +1,7 @@
 import Flutter
 import AVFoundation
 import QuartzCore
+import UserNotifications
 #if canImport(Lottie)
 import Lottie
 #endif
@@ -54,7 +55,41 @@ import UIKit
         splashCoordinator = EasySplashCoordinator(window: window, config: splashConfig)
         splashCoordinator?.presentIfNeeded()
 
+    if #available(iOS 10.0, *) {
+      UNUserNotificationCenter.current().delegate = self as? UNUserNotificationCenterDelegate
+    }
+    application.registerForRemoteNotifications()
+
     GeneratedPluginRegistrant.register(with: self)
+
+    if let messenger = self.registrar(forPlugin: "iSmartAppChannels")?.messenger() {
+      let shareChannel = FlutterMethodChannel(name: "app.share_receiver", binaryMessenger: messenger)
+      shareChannel.setMethodCallHandler { call, result in
+        switch call.method {
+        case "getInitialSharedContent":
+          result(nil)
+        case "updateDirectShareTargets":
+          result(true)
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      }
+
+      let installerChannel = FlutterMethodChannel(name: "app.installer", binaryMessenger: messenger)
+      installerChannel.setMethodCallHandler { call, result in
+        switch call.method {
+        case "canInstallUnknownApps":
+          result(false)
+        case "openUnknownAppsSettings":
+          result(false)
+        case "installApk":
+          result(FlutterError(code: "IOS_UNSUPPORTED", message: "APK installation is not supported on iOS", details: nil))
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      }
+    }
+
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 }

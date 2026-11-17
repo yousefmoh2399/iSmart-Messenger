@@ -12,7 +12,6 @@ import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'package:mobile_app/features/chat/data/chat_local_cache.dart';
 import 'package:mobile_app/features/chat/models/chat_models.dart';
-import 'package:mobile_app/features/chat/presentation/chat_overview_controller.dart';
 import 'package:mobile_app/features/chat/data/chat_repository.dart';
 import 'package:mobile_app/features/chat/data/chat_socket_service.dart';
 import 'package:mobile_app/shared/providers/providers.dart';

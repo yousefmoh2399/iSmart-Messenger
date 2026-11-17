@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 
@@ -37,18 +38,30 @@ class AndroidShareReceiver {
   static Stream<AndroidSharedContent> get events => _events.stream;
 
   static Future<AndroidSharedContent?> initialize() async {
+    if (!Platform.isAndroid) return null;
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'sharedContent') {
         final content = AndroidSharedContent.fromRaw(call.arguments);
         if (content != null) _events.add(content);
       }
     });
-    return AndroidSharedContent.fromRaw(
-      await _channel.invokeMethod('getInitialSharedContent'),
-    );
+    try {
+      return AndroidSharedContent.fromRaw(
+        await _channel.invokeMethod('getInitialSharedContent'),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<void> updateDirectShareTargets(
     List<Map<String, String>> targets,
-  ) => _channel.invokeMethod('updateDirectShareTargets', {'targets': targets});
+  ) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('updateDirectShareTargets', {
+        'targets': targets,
+      });
+    } catch (_) {}
+  }
 }
