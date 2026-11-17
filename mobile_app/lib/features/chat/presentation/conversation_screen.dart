@@ -2784,7 +2784,6 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         await _scanMediaFile(destinationPath);
       } catch (_) {}
     }
-    }
 
     return 'مجلد التنزيلات (${p.basename(publicDownloadDir.path)})';
   }

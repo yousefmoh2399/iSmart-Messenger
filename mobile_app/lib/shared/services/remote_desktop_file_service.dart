@@ -194,7 +194,7 @@ class RemoteDesktopFileService {
           },
         );
 
-        return _requestAndAwaitResult(
+        return await _requestAndAwaitResult(
           payload: {
             'transferId': transfer['id']?.toString(),
             'fileName': resolvedFileName,
