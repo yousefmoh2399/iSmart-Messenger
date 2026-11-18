@@ -227,6 +227,23 @@ const deleteUserHandler = asyncHandler(async (req, res) => {
   sendChatResponse(res, { status: 200, data: result });
 });
 
+const deleteMyAccountHandler = asyncHandler(async (req, res) => {
+  const userId = req.user.id || req.user._id;
+  const result = await deleteUser(req.user, userId);
+  const io = req.app.get("io");
+  if (io) {
+    io.emit("users_updated", {});
+    io.to(`user:${userId}`).emit("force_logout", {
+      reason: "account_deleted",
+    });
+  }
+  sendChatResponse(res, {
+    status: 200,
+    message: "تم حذف الحساب وجميع البيانات المرتبطة به بنجاح.",
+    data: result,
+  });
+});
+
 module.exports = {
   exportUsersHandler,
   getUsers,
@@ -238,6 +255,7 @@ module.exports = {
   resetManagedUserPassword,
   logoutUserAllHandler,
   deleteUserHandler,
+  deleteMyAccountHandler,
   getMyProfile,
   updateMyProfile,
   uploadMyAvatar,

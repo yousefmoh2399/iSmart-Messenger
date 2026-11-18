@@ -982,13 +982,25 @@ async function logoutUserAll(actor, userId, io = null) {
 }
 
 async function deleteUser(actor, userId) {
-  if (actor.role !== "admin" && actor.permissions?.canCreateUsers !== true) {
+  const isSelf =
+    actor &&
+    (actor.id?.toString() === userId.toString() ||
+      actor._id?.toString() === userId.toString());
+
+  if (!isSelf && actor.role !== "admin" && actor.permissions?.canCreateUsers !== true) {
     throw new ApiError(403, "Admin access required.");
   }
 
   const user = await User.findById(userId).lean();
   if (!user) {
     throw new ApiError(404, "User not found.");
+  }
+
+  if (isSelf && user.role === "admin") {
+    const adminCount = await User.countDocuments({ role: "admin", isActive: true });
+    if (adminCount <= 1) {
+      throw new ApiError(400, "لا يمكن حذف حساب المسؤول الوحيد في النظام. يجب تعيين مسؤول آخر أولاً.");
+    }
   }
 
   const Conversation = require("../chat/models/conversation.model");

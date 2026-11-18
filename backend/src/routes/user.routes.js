@@ -18,6 +18,7 @@ const {
   downloadAvatar,
   logoutUserAllHandler,
   deleteUserHandler,
+  deleteMyAccountHandler,
 } = require("../controllers/user.controller");
 const { requireAuth } = require("../middleware/auth.middleware");
 const { requirePermission } = require("../middleware/permission.middleware");
@@ -133,6 +134,8 @@ router.delete(
   validateRequest,
   unregisterMyPushDevice,
 );
+
+router.delete("/me", deleteMyAccountHandler);
 
 router.get("/export", requireUserManagementRead, exportUsersHandler);
 router.get("/batch-templates", requireUserManagementRead, getBatchJobTemplatesHandler);
