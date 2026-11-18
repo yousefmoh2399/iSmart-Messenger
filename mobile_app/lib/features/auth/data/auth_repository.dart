@@ -753,6 +753,28 @@ class AuthRepository {
     }
   }
 
+  Future<void> deleteAccount() async {
+    final token = await getToken();
+    try {
+      if (token != null && token.trim().isNotEmpty) {
+        await _apiClient.dio.delete<Map<String, dynamic>>(
+          '/api/users/me',
+          options: Options(
+            headers: {'Authorization': 'Bearer $token'},
+            sendTimeout: const Duration(seconds: 15),
+            receiveTimeout: const Duration(seconds: 15),
+            extra: {'requestSource': 'auth.delete_account'},
+          ),
+        );
+      }
+    } catch (error) {
+      debugPrint('[AuthRepository] Delete account request failed: $error');
+      rethrow;
+    } finally {
+      await _clearSession();
+    }
+  }
+
   Future<void> _saveCachedUser(AppUser user) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_cachedUserKey, jsonEncode(user.toJson()));

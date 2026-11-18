@@ -419,6 +419,137 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
+  Future<void> _confirmDeleteAccount() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return Dialog(
+          backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 380),
+            child: Padding(
+              padding: const EdgeInsets.all(22),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFDC2626).withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Center(
+                      child: Icon(
+                        CupertinoIcons.trash,
+                        color: Color(0xFFDC2626),
+                        size: 26,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'حذف الحساب نهائيًا',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'هل أنت متأكد من رغبتك في حذف حسابك نهائيًا؟\nسيتم حذف جميع محادثاتك ورسائلك ومستنداتك بشكل لا يمكن استرجاعه، وسيتم إنهاء تسجيل الدخول فوراً.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 1.4,
+                      color: isDark ? Colors.white70 : const Color(0xFF64748B),
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 11),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text('إلغاء'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFFDC2626),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 11),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text('حذف نهائي'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (confirmed == true && mounted) {
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => const PopScope(
+          canPop: false,
+          child: Center(
+            child: Card(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(strokeWidth: 2.5),
+                    SizedBox(width: 16),
+                    Text('جاري حذف الحساب...'),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      try {
+        await ref.read(authControllerProvider.notifier).deleteAccount();
+        if (mounted && Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+      } catch (e) {
+        if (mounted && Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('تعذر حذف الحساب: $e'),
+              backgroundColor: const Color(0xFFDC2626),
+            ),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authControllerProvider);
@@ -1047,7 +1178,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
             const SizedBox(height: 22),
 
-            // ── Group 8: Logout Action ───────────────────────────────────────
+            // ── Group 8: Account Actions (Logout & Delete Account) ────────────
             _buildAppleGroup(
               cardColor: cardColor,
               dividerColor: dividerColor,
@@ -1059,6 +1190,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   subtitle: 'إنهاء الجلسة والخروج من الحساب الحالي',
                   isDestructive: true,
                   onTap: _confirmLogout,
+                ),
+                _AppleTile(
+                  icon: CupertinoIcons.trash,
+                  iconColor: const Color(0xFFDC2626),
+                  label: 'حذف الحساب نهائيًا',
+                  subtitle: 'مسح الحساب وجميع البيانات والمحادثات المرتبطة به',
+                  isDestructive: true,
+                  onTap: _confirmDeleteAccount,
                 ),
               ],
             ),
