@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../../features/auth/data/auth_repository.dart';
@@ -26,6 +27,14 @@ class ApiClient {
         ),
       ),
       _authRepository = authRepository {
+    if (!kIsWeb && dio.httpClientAdapter is IOHttpClientAdapter) {
+      (dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
+        final client = HttpClient();
+        client.badCertificateCallback =
+            (X509Certificate cert, String host, int port) => true;
+        return client;
+      };
+    }
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {

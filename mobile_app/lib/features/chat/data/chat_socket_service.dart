@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
@@ -66,8 +67,8 @@ class ChatSocketService {
             'token': token,
             'clientType': clientType,
             'deviceInfo': {
-              'platform': 'android',
-              'os': 'Android',
+              'platform': Platform.isIOS ? 'ios' : 'android',
+              'os': Platform.operatingSystem,
               'appVersion': '1.2.9',
             },
           })
