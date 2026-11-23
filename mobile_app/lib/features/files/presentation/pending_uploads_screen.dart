@@ -6,6 +6,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/share_origin.dart';
 import '../../../shared/models/pending_upload.dart';
 import '../../../shared/providers/providers.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
@@ -506,9 +507,13 @@ class _PendingUploadsScreenState extends ConsumerState<PendingUploadsScreen> {
                         }
                       },
                       onQuickShare: () async {
-                        await Share.shareXFiles([
-                          XFile(item.filePath, name: item.fileName),
-                        ], text: item.fileName);
+                        await Share.shareXFiles(
+                          [XFile(item.filePath, name: item.fileName)],
+                          text: item.fileName,
+                          sharePositionOrigin: resolveSharePositionOrigin(
+                            context,
+                          ),
+                        );
                       },
                       onDelete: () => _confirmDelete(item),
                     ),

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -61,7 +63,7 @@ class _NotificationSettingsScreenState
                 SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'تم إرسال إشعارين تجريبيين مجمعين بنجاح! اسحب شريط الإشعارات لرؤية التجميع كواتساب.',
+                    'تم إرسال إشعارين تجريبيين بنجاح! اسحب مركز الإشعارات لرؤية التجميع.',
                   ),
                 ),
               ],
@@ -623,7 +625,9 @@ class _NotificationSettingsScreenState
                   icon: Icons.tune_rounded,
                   iconColor: const Color(0xFF007AFF),
                   title: 'فتح إعدادات إشعارات النظام',
-                  subtitle: 'التحكم في ظهور الإشعارات على شاشة القفل والأولويات من أندرويد',
+                  subtitle: Platform.isIOS
+                      ? 'التحكم في ظهور الإشعارات والأصوات والشارات من إعدادات النظام'
+                      : 'التحكم في ظهور الإشعارات على شاشة القفل والأولويات من إعدادات النظام',
                   onTap: () async {
                     await openAppSettings();
                   },

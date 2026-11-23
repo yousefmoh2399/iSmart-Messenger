@@ -125,11 +125,16 @@ router.post(
 router.delete(
   "/me/push-devices",
   [
-    body("token")
-      .isString()
-      .trim()
-      .notEmpty()
-      .withMessage("رمز الإشعارات مطلوب."),
+    body("token").optional().isString().trim(),
+    body("deviceId").optional().isString().trim(),
+    body().custom((value, { req }) => {
+      const token = String(req.body?.token || "").trim();
+      const deviceId = String(req.body?.deviceId || "").trim();
+      if (!token && !deviceId) {
+        throw new Error("رمز الإشعارات أو معرّف الجهاز مطلوب.");
+      }
+      return true;
+    }),
   ],
   validateRequest,
   unregisterMyPushDevice,

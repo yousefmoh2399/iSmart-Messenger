@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/mobile_app.dart';
+import 'firebase_options.dart';
 import 'shared/services/app_error_log_service.dart';
 import 'shared/services/push_notification_service.dart';
 
@@ -44,7 +46,16 @@ Future<void> main() async {
         );
         return false;
       };
-      await PushNotificationService.registerBackgroundHandler();
+      try {
+        if (Firebase.apps.isEmpty) {
+          await Firebase.initializeApp(
+            options: DefaultFirebaseOptions.currentPlatform,
+          );
+        }
+        await PushNotificationService.registerBackgroundHandler();
+      } catch (e) {
+        debugPrint('[Main] Firebase init warning: $e');
+      }
       runApp(const ProviderScope(child: WorkplaceMobileApp()));
     },
     (error, stack) {

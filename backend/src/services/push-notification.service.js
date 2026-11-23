@@ -153,6 +153,36 @@ function androidChannelIdForToneId(toneId) {
   }
 }
 
+function iosSoundForToneId(toneId) {
+  switch (normalizeNotificationToneId(toneId)) {
+    case "chime":
+      return "chime_tone.caf";
+    case "alert":
+      return "alert_tone.caf";
+    case "silent":
+      return null;
+    default:
+      return "default_tone.caf";
+  }
+}
+
+function buildApnsPayload({ toneId, threadId, collapseId, category } = {}) {
+  const iosSound = iosSoundForToneId(toneId);
+  const aps = {
+    contentAvailable: true,
+    mutableContent: true,
+    ...(threadId ? { threadId } : {}),
+    ...(category ? { category } : {}),
+    ...(iosSound ? { sound: iosSound } : {}),
+  };
+  const headers = {
+    "apns-push-type": "alert",
+    "apns-priority": "10",
+    ...(collapseId ? { "apns-collapse-id": collapseId } : {}),
+  };
+  return { headers, payload: { aps } };
+}
+
 function groupPushDevicesByAndroidChannel(devices = []) {
   const grouped = new Map();
   for (const entry of devices) {
@@ -161,10 +191,13 @@ function groupPushDevicesByAndroidChannel(devices = []) {
       continue;
     }
     const platform = normalizePlatform(entry?.platform);
-    const bucketKey =
-      platform === "android"
-        ? `android:${androidChannelIdForToneId(entry?.notificationToneId)}`
-        : `other:${platform}`;
+    const toneId = normalizeNotificationToneId(entry?.notificationToneId);
+    let bucketKey = `other:${platform}`;
+    if (platform === "android") {
+      bucketKey = `android:${androidChannelIdForToneId(toneId)}`;
+    } else if (platform === "ios") {
+      bucketKey = `ios:${toneId}`;
+    }
     const bucket = grouped.get(bucketKey) || [];
     bucket.push(entry);
     grouped.set(bucketKey, bucket);
@@ -326,18 +359,12 @@ async function sendChatPushNotifications({
             tag: `chat_${convId}`,
           },
         },
-        apns: {
-          headers: {
-            "apns-priority": "10",
-            "apns-collapse-id": `chat_${convId}`,
-          },
-          payload: {
-            aps: {
-              sound: "default",
-              contentAvailable: true,
-            },
-          },
-        },
+        apns: buildApnsPayload({
+          toneId: firstDevice.notificationToneId,
+          threadId: convId ? `chat_${convId}` : undefined,
+          collapseId: convId ? `chat_${convId}` : undefined,
+          category: "chat_reply_category",
+        }),
       });
 
       successCount += response.successCount || 0;
@@ -453,17 +480,11 @@ async function sendChatReactionPushNotifications({
             tag: `chat_${String(conversationId || "").trim()}`,
           },
         },
-        apns: {
-          headers: {
-            "apns-priority": "10",
-          },
-          payload: {
-            aps: {
-              sound: "default",
-              contentAvailable: true,
-            },
-          },
-        },
+        apns: buildApnsPayload({
+          toneId: firstDevice.notificationToneId,
+          threadId: conversationId ? `chat_${String(conversationId).trim()}` : undefined,
+          category: "chat_reply_category",
+        }),
       });
 
       successCount += response.successCount || 0;
@@ -568,10 +589,10 @@ async function sendTicketPushNotifications({
             tag: `ticket_${ticketId}`,
           },
         },
-        apns: {
-          headers: { "apns-priority": "10" },
-          payload: { aps: { sound: "default", contentAvailable: true } },
-        },
+        apns: buildApnsPayload({
+          toneId: firstDevice.notificationToneId,
+          threadId: ticketId ? `ticket_${ticketId}` : undefined,
+        }),
       });
 
       successCount += response.successCount || 0;
@@ -800,17 +821,10 @@ async function sendReminderPushNotifications({
               tag: `reminder_${messageId || conversationId}`,
             },
           },
-          apns: {
-            headers: {
-              "apns-priority": "10",
-            },
-            payload: {
-              aps: {
-                sound: "default",
-                contentAvailable: true,
-              },
-            },
-          },
+          apns: buildApnsPayload({
+            toneId: firstDevice.notificationToneId,
+            threadId: conversationId ? `chat_${conversationId}` : undefined,
+          }),
         });
       } catch (_) {}
     }

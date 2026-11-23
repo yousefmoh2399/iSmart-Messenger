@@ -16,7 +16,7 @@ import UIKit
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
         let splashConfig = EasySplashNativeConfig(
-            duration: 5.8,
+            duration: 1.4,
             themeMode: "system",
             text: "Copyright © 2026 Yousef Mohamed",
             backgroundLightHex: "#F4F5F7",
@@ -58,9 +58,9 @@ import UIKit
     if #available(iOS 10.0, *) {
       UNUserNotificationCenter.current().delegate = self as? UNUserNotificationCenterDelegate
     }
-    application.registerForRemoteNotifications()
 
     GeneratedPluginRegistrant.register(with: self)
+    application.registerForRemoteNotifications()
 
     if let messenger = self.registrar(forPlugin: "iSmartAppChannels")?.messenger() {
       let shareChannel = FlutterMethodChannel(name: "app.share_receiver", binaryMessenger: messenger)
@@ -74,23 +74,18 @@ import UIKit
           result(FlutterMethodNotImplemented)
         }
       }
-
-      let installerChannel = FlutterMethodChannel(name: "app.installer", binaryMessenger: messenger)
-      installerChannel.setMethodCallHandler { call, result in
-        switch call.method {
-        case "canInstallUnknownApps":
-          result(false)
-        case "openUnknownAppsSettings":
-          result(false)
-        case "installApk":
-          result(FlutterError(code: "IOS_UNSUPPORTED", message: "APK installation is not supported on iOS", details: nil))
-        default:
-          result(FlutterMethodNotImplemented)
-        }
-      }
     }
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  override func applicationDidBecomeActive(_ application: UIApplication) {
+    super.applicationDidBecomeActive(application)
+    if #available(iOS 16.0, *) {
+      UNUserNotificationCenter.current().setBadgeCount(0) { _ in }
+    } else {
+      application.applicationIconBadgeNumber = 0
+    }
   }
 }
 // BEGIN SIMPLE_SPLASH_VIEW_SUPPORT

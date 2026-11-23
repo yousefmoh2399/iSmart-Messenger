@@ -1,12 +1,12 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/config/app_config.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../shared/providers/providers.dart';
 import '../../../shared/widgets/button_loading_indicator.dart';
+import '../../profile/presentation/privacy_policy_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -843,21 +843,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               vertical: 8,
                             ),
                           ),
-                          onPressed: () async {
-                            final url = currentBaseUrl.isNotEmpty
-                                ? currentBaseUrl
-                                : AppConfig.defaultApiBaseUrl;
-                            final uri = Uri.parse(
-                              url.endsWith('/')
-                                  ? '${url}privacy-policy'
-                                  : '$url/privacy-policy',
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              CupertinoPageRoute(
+                                builder: (_) => const PrivacyPolicyScreen(),
+                              ),
                             );
-                            if (await canLaunchUrl(uri)) {
-                              await launchUrl(
-                                uri,
-                                mode: LaunchMode.externalApplication,
-                              );
-                            }
                           },
                           icon: Icon(
                             CupertinoIcons.shield_lefthalf_fill,

@@ -18,6 +18,9 @@
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		A1B2C3D42B00000100000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42B00000000000001 /* PrivacyInfo.xcprivacy */; };
+		A1B2C3D42B00000300000001 /* default_tone.caf in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42B00000200000001 /* default_tone.caf */; };
+		A1B2C3D42B00000300000002 /* chime_tone.caf in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42B00000200000002 /* chime_tone.caf */; };
+		A1B2C3D42B00000300000003 /* alert_tone.caf in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42B00000200000003 /* alert_tone.caf */; };
 		F1AF2A475B29CA47116FD3DB /* simple_splash_view_image_dark.png in Resources */ = {isa = PBXBuildFile; fileRef = 105742E7E0C5FB03E99AE8AE /* simple_splash_view_image_dark.png */; };
 /* End PBXBuildFile section */
 
@@ -66,6 +69,9 @@
 		97C147001CF9000F007C117D /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1B2C3D42B00000000000001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A1B2C3D42B00000200000001 /* default_tone.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = default_tone.caf; sourceTree = "<group>"; };
+		A1B2C3D42B00000200000002 /* chime_tone.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = chime_tone.caf; sourceTree = "<group>"; };
+		A1B2C3D42B00000200000003 /* alert_tone.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = alert_tone.caf; sourceTree = "<group>"; };
 		C1358942C4C08B1CE17C0C77 /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		F80A095E9031839596F0FC4F /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -137,6 +143,9 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 				A1B2C3D42B00000000000001 /* PrivacyInfo.xcprivacy */,
+				A1B2C3D42B00000200000001 /* default_tone.caf */,
+				A1B2C3D42B00000200000002 /* chime_tone.caf */,
+				A1B2C3D42B00000200000003 /* alert_tone.caf */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -275,6 +284,9 @@
 				97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */,
 				97C146FC1CF9000F007C117D /* Main.storyboard in Resources */,
 				A1B2C3D42B00000100000001 /* PrivacyInfo.xcprivacy in Resources */,
+				A1B2C3D42B00000300000001 /* default_tone.caf in Resources */,
+				A1B2C3D42B00000300000002 /* chime_tone.caf in Resources */,
+				A1B2C3D42B00000300000003 /* alert_tone.caf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -481,7 +493,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.ismartmessenger.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ismart.messenger;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -495,9 +507,10 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9SGAUMPF23;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ismart.messenger.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ismartmessenger.app.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -512,9 +525,10 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9SGAUMPF23;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ismart.messenger.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ismartmessenger.app.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Runner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Runner";
@@ -527,9 +541,10 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9SGAUMPF23;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ismart.messenger.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ismartmessenger.app.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Runner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Runner";
@@ -662,7 +677,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.ismartmessenger.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ismart.messenger;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -686,7 +701,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.ismartmessenger.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ismart.messenger;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;

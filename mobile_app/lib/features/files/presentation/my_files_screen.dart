@@ -13,6 +13,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/share_origin.dart';
 import '../../../shared/models/document_folder.dart';
 import '../../../shared/models/remote_document.dart';
 import '../../../shared/providers/providers.dart';
@@ -1134,11 +1135,16 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
 
   Future<void> _shareDocument(RemoteDocument document) async {
     try {
+      final shareOrigin = resolveSharePositionOrigin(context);
       final localPath = await ref
           .read(documentRepositoryProvider)
           .downloadDocument(document);
       final xFile = XFile(localPath, mimeType: 'application/pdf');
-      await Share.shareXFiles([xFile], text: document.fileName);
+      await Share.shareXFiles(
+        [xFile],
+        text: document.fileName,
+        sharePositionOrigin: shareOrigin,
+      );
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -1150,10 +1156,15 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
 
   Future<void> _sharePendingUpload(PendingUpload upload) async {
     try {
+      final shareOrigin = resolveSharePositionOrigin(context);
       final file = File(upload.filePath);
       if (await file.exists()) {
         final xFile = XFile(upload.filePath, mimeType: 'application/pdf');
-        await Share.shareXFiles([xFile], text: upload.fileName);
+        await Share.shareXFiles(
+          [xFile],
+          text: upload.fileName,
+          sharePositionOrigin: shareOrigin,
+        );
       } else {
         throw Exception('الملف غير موجود.');
       }

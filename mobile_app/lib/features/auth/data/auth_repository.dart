@@ -755,23 +755,26 @@ class AuthRepository {
 
   Future<void> deleteAccount() async {
     final token = await getToken();
+    if (token == null || token.trim().isEmpty) {
+      throw const ApiException(
+        'انتهت صلاحية الجلسة أو فشل التحقق. سجل الدخول مرة أخرى.',
+        statusCode: 401,
+      );
+    }
     try {
-      if (token != null && token.trim().isNotEmpty) {
-        await _apiClient.dio.delete<Map<String, dynamic>>(
-          '/api/users/me',
-          options: Options(
-            headers: {'Authorization': 'Bearer $token'},
-            sendTimeout: const Duration(seconds: 15),
-            receiveTimeout: const Duration(seconds: 15),
-            extra: {'requestSource': 'auth.delete_account'},
-          ),
-        );
-      }
+      await _apiClient.dio.delete<Map<String, dynamic>>(
+        '/api/users/me',
+        options: Options(
+          headers: {'Authorization': 'Bearer $token'},
+          sendTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 15),
+          extra: {'requestSource': 'auth.delete_account'},
+        ),
+      );
+      await _clearSession();
     } catch (error) {
       debugPrint('[AuthRepository] Delete account request failed: $error');
-      rethrow;
-    } finally {
-      await _clearSession();
+      throw _apiClient.mapError(error);
     }
   }
 

@@ -62,6 +62,9 @@ class DefaultFirebaseOptions {
     projectId: 'ismart-messenger',
     storageBucket: 'ismart-messenger.firebasestorage.app',
   );
+  // TODO: After registering iOS Bundle ID `com.ismartmessenger.app` in Firebase
+  // Console, run `flutterfire configure` (or update apiKey/appId from the new
+  // GoogleService-Info.plist) so FCM iOS matches your Apple Firebase app.
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyBnlCaXzG4fQ2RkWoCY7vUjG5E_5xmFE-U',

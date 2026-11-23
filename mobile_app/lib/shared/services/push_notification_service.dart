@@ -5,7 +5,9 @@ import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/network/api_client.dart';
@@ -17,9 +19,11 @@ import 'permission_request_coordinator.dart';
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    }
     final data = message.data;
     final type = data['type']?.toString();
     final conversationId = data['conversationId']?.toString().trim();
@@ -87,11 +91,14 @@ class PushNotificationService {
     }
 
     try {
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+      }
       _firebaseReady = true;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[PushNotificationService] Firebase initialize failed: $e');
       _firebaseReady = false;
       _initialized = true;
       return;
@@ -102,10 +109,12 @@ class PushNotificationService {
     await PermissionRequestCoordinator.run(
       () => messaging.requestPermission(alert: true, badge: true, sound: true),
     );
+    // Foreground notifications are rendered via LocalNotificationService so
+    // mute settings, preview preferences, and active-chat suppression apply.
     await messaging.setForegroundNotificationPresentationOptions(
-      alert: true,
-      badge: true,
-      sound: true,
+      alert: false,
+      badge: false,
+      sound: false,
     );
 
     _foregroundMessageSubscription = FirebaseMessaging.onMessage.listen((
@@ -167,17 +176,27 @@ class PushNotificationService {
     }
     try {
       if (Platform.isIOS) {
-        final apnsToken = await FirebaseMessaging.instance.getAPNSToken();
+        String? apnsToken = await FirebaseMessaging.instance.getAPNSToken();
+        for (var attempt = 0; apnsToken == null && attempt < 7; attempt++) {
+          await Future<void>.delayed(const Duration(seconds: 1));
+          apnsToken = await FirebaseMessaging.instance.getAPNSToken();
+        }
         if (apnsToken == null) {
-          await Future<void>.delayed(const Duration(seconds: 2));
+          debugPrint(
+            '[PushNotificationService] APNs token unavailable on iOS '
+            '(normal on simulator; on device verify APNs capability and Firebase APNs .p8 key).',
+          );
         }
       }
       final token = await FirebaseMessaging.instance.getToken();
       if (token == null || token.trim().isEmpty) {
+        debugPrint('[PushNotificationService] FCM token is empty/null');
         return;
       }
       await _registerToken(token);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[PushNotificationService] registerForAuthenticatedUser error: $e');
+    }
   }
 
   Future<String?> getCurrentToken() async {
@@ -239,6 +258,13 @@ class PushNotificationService {
     }
     final notificationToneId = await _localNotificationService
         .getCurrentNotificationToneId();
+    String? appVersion;
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (info.version.trim().isNotEmpty) {
+        appVersion = info.version.trim();
+      }
+    } catch (_) {}
 
     try {
       await _apiClient.dio.post<Map<String, dynamic>>(
@@ -248,11 +274,14 @@ class PushNotificationService {
           'platform': Platform.isIOS ? 'ios' : 'android',
           'deviceId': await _loadOrCreateDeviceId(),
           'deviceName': Platform.operatingSystem,
+          if (appVersion != null) 'appVersion': appVersion,
           'notificationToneId': notificationToneId,
         },
         options: Options(headers: {'Authorization': 'Bearer $authToken'}),
       );
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[PushNotificationService] _registerToken failed: $e');
+    }
   }
 
   Future<String> _loadOrCreateDeviceId() async {

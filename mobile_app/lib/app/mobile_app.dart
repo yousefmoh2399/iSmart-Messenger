@@ -43,7 +43,7 @@ class WorkplaceMobileApp extends ConsumerWidget {
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'ماسح المستندات',
+      title: 'iSmart Messenger',
       locale: const Locale('ar'),
       supportedLocales: const [Locale('ar'), Locale('en')],
       localizationsDelegates: const [
@@ -141,8 +141,10 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       _setChatVisibility(false);
       ref.read(chatSocketServiceProvider).setPresenceOffline();
       ref.read(chatSocketServiceProvider).disconnect();
-      unawaited(_updateAgent.clearUpdateState());
-      _updateAgent.stop();
+      if (!Platform.isIOS) {
+        unawaited(_updateAgent.clearUpdateState());
+        _updateAgent.stop();
+      }
       _isEstablishingConnection = true;
       _connectionEstablishTimer?.cancel();
       return;
@@ -178,10 +180,12 @@ class _AuthGateState extends ConsumerState<_AuthGate>
 
       ref.read(pushNotificationServiceProvider).registerForAuthenticatedUser();
 
-      debugPrint(
-        '[_AuthGateState] Preparing update agent for ${user.username}',
-      );
-      unawaited(_updateAgent.start(user));
+      if (!Platform.isIOS) {
+        debugPrint(
+          '[_AuthGateState] Preparing update agent for ${user.username}',
+        );
+        unawaited(_updateAgent.start(user));
+      }
       ref.invalidate(remoteDocumentsControllerProvider);
       ref.invalidate(adminDocumentsControllerProvider);
       unawaited(_syncAdminServerDefaults());
@@ -1259,6 +1263,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _initializeUpdateAgent() async {
+    if (Platform.isIOS) return;
     await _updateAgent.initialize();
 
     // Listen for update events

@@ -235,13 +235,17 @@ class AuthController extends Notifier<AuthState> {
     try {
       debugPrint('[AuthController] Deleting account...');
 
-      // Transition immediately to unauthenticated to prevent accessing protected resources
-      state = const AuthState(status: AuthStatus.unauthenticated);
+      // Delete account on backend FIRST; if this fails (e.g., offline or sole admin),
+      // keep the user authenticated and surface the error cleanly.
+      await ref
+          .read(authRepositoryProvider)
+          .deleteAccount()
+          .timeout(const Duration(seconds: 15));
 
-      // Reset active conversation
+      // Account confirmed deleted -> transition to unauthenticated and clean up state.
+      state = const AuthState(status: AuthStatus.unauthenticated);
       ref.read(activeConversationIdProvider.notifier).state = null;
 
-      // Invalidate all dependent providers
       ref.invalidate(chatOverviewControllerProvider);
       ref.invalidate(chatRealtimeControllerProvider);
       ref.invalidate(usersControllerProvider);
@@ -256,18 +260,15 @@ class AuthController extends Notifier<AuthState> {
       ref.invalidate(documentFoldersProvider);
       ref.invalidate(chatFoldersProvider);
 
-      // Disconnect socket
       try {
         ref.read(chatSocketServiceProvider).setPresenceOffline();
         ref.read(chatSocketServiceProvider).disconnect();
       } catch (_) {}
 
-      // Cancel all active notifications immediately
       try {
         await ref.read(localNotificationServiceProvider).cancelAllNotifications();
       } catch (_) {}
 
-      // Unregister push device
       try {
         await ref
             .read(pushNotificationServiceProvider)
@@ -277,17 +278,6 @@ class AuthController extends Notifier<AuthState> {
         debugPrint('[AuthController] Unregister push device error: $e');
       }
 
-      // Call deleteAccount on repository
-      try {
-        await ref
-            .read(authRepositoryProvider)
-            .deleteAccount()
-            .timeout(const Duration(seconds: 15));
-      } catch (e) {
-        debugPrint('[AuthController] Delete account repository error: $e');
-      }
-
-      // Wipe cached chat data
       try {
         await ref.read(chatLocalCacheProvider).clearAll();
       } catch (_) {}
@@ -295,7 +285,7 @@ class AuthController extends Notifier<AuthState> {
       debugPrint('[AuthController] Account deleted and cleaned up successfully');
     } catch (e) {
       debugPrint('[AuthController] Delete account error: $e');
-      state = const AuthState(status: AuthStatus.unauthenticated);
+      rethrow;
     } finally {
       _isLoggingOut = false;
     }

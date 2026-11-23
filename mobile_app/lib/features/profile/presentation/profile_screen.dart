@@ -4,7 +4,6 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/config/app_config.dart';
 import '../../../core/settings/user_preferences.dart';
@@ -27,6 +26,7 @@ import '../../printers/presentation/printer_monitoring_screen.dart';
 import '../../tickets/presentation/tickets_screen.dart';
 import 'active_sessions_screen.dart';
 import 'notification_settings_screen.dart';
+import 'privacy_policy_screen.dart';
 import 'storage_management_screen.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
@@ -1139,20 +1139,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   iconColor: const Color(0xFF007AFF),
                   label: 'سياسة الخصوصية وأمان البيانات',
                   subtitle: 'Privacy Policy & Data Protection',
-                  onTap: () async {
-                    final baseUrl = ref
-                            .read(apiBaseUrlControllerProvider)
-                            .valueOrNull ??
-                        AppConfig.defaultApiBaseUrl;
-                    final uri = Uri.parse(
-                      baseUrl.endsWith('/')
-                          ? '${baseUrl}privacy-policy'
-                          : '$baseUrl/privacy-policy',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      CupertinoPageRoute(
+                        builder: (_) => const PrivacyPolicyScreen(),
+                      ),
                     );
-                    if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri,
-                          mode: LaunchMode.externalApplication);
-                    }
                   },
                 ),
                 _AppleTile(

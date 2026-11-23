@@ -1,6 +1,7 @@
-import 'dart:io';
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -176,7 +177,10 @@ class LocalNotificationService {
   // Active notifications tracking for WhatsApp-style chat grouping
   final Map<String, List<String>> _conversationSnippets = {};
   final Map<String, Set<int>> _conversationNotificationIds = {};
+  final Set<String> _recentMessageIds = <String>{};
+  final Queue<String> _recentMessageOrder = Queue<String>();
   static const int _summaryIdOffset = 1000000;
+  static const int _maxTrackedMessageIds = 100;
 
   Stream<Map<String, dynamic>> get tapEvents => _tapController.stream;
 
@@ -237,13 +241,30 @@ class LocalNotificationService {
     }
 
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const darwin = DarwinInitializationSettings();
+    final darwin = DarwinInitializationSettings(
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
+      notificationCategories: <DarwinNotificationCategory>[
+        DarwinNotificationCategory(
+          'chat_reply_category',
+          actions: <DarwinNotificationAction>[
+            DarwinNotificationAction.text(
+              'reply_action',
+              'رد',
+              buttonTitle: 'إرسال',
+              placeholder: 'اكتب ردك هنا...',
+            ),
+          ],
+        ),
+      ],
+    );
     const windows = WindowsInitializationSettings(
       appName: 'Workplace Chat',
       appUserModelId: 'workplace.chat.mobile',
       guid: '5f5a15fb-4364-4385-97fc-70c7ce5e6e61',
     );
-    const settings = InitializationSettings(
+    final settings = InitializationSettings(
       android: android,
       iOS: darwin,
       windows: windows,
@@ -283,7 +304,48 @@ class LocalNotificationService {
           AndroidFlutterLocalNotificationsPlugin>();
       return (await androidPlugin?.areNotificationsEnabled()) ?? true;
     }
+    if (Platform.isIOS) {
+      final iosPlugin = _plugin.resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin>();
+      final options = await iosPlugin?.checkPermissions();
+      if (options == null) {
+        return true;
+      }
+      return options.isEnabled || options.isAlertEnabled;
+    }
     return true;
+  }
+
+  String? _iosSoundFileForToneId(String toneId) {
+    return switch (NotificationTone.fromId(toneId).id) {
+      'chime' => 'chime_tone.caf',
+      'alert' => 'alert_tone.caf',
+      'silent' => null,
+      _ => 'default_tone.caf',
+    };
+  }
+
+  bool _shouldSkipDuplicateMessage(
+    Map<String, dynamic>? payload, {
+    required bool isTestNotification,
+  }) {
+    if (isTestNotification || payload == null) {
+      return false;
+    }
+    final messageId = payload['messageId']?.toString().trim() ?? '';
+    if (messageId.isEmpty) {
+      return false;
+    }
+    if (_recentMessageIds.contains(messageId)) {
+      return true;
+    }
+    _recentMessageIds.add(messageId);
+    _recentMessageOrder.addLast(messageId);
+    while (_recentMessageOrder.length > _maxTrackedMessageIds) {
+      final evicted = _recentMessageOrder.removeFirst();
+      _recentMessageIds.remove(evicted);
+    }
+    return false;
   }
 
   Future<void> showIncomingMessage({
@@ -336,19 +398,55 @@ class LocalNotificationService {
     if (effectiveTitle.isEmpty) effectiveTitle = appName;
     if (effectiveBody.isEmpty) effectiveBody = 'لديك رسالة جديدة';
 
+    // Deduplicate simultaneous Socket.IO and FCM foreground deliveries
+    if (_shouldSkipDuplicateMessage(
+      payload,
+      isTestNotification: isTestNotification,
+    )) {
+      return;
+    }
+
     // Selected tone & vibration
     final toneId = isGroup ? preferences.groupToneId : preferences.notificationToneId;
+    final tone = NotificationTone.fromId(toneId);
     final shouldVibrate = isGroup ? preferences.groupVibrate : preferences.messageVibrate;
+    final isSoundOnly =
+        preferences.notificationDisplayMode == NotificationDisplayMode.soundOnly &&
+        !isTestNotification;
 
-    // Play sound if not silent and in sound-allowing mode
-    if (preferences.notificationDisplayMode != NotificationDisplayMode.hideDetails || isTestNotification) {
-      await _playNotificationTone(toneId);
+    // On Android/desktop (or iOS soundOnly), play via just_audio; on iOS banners
+    // native UNNotificationSound plays the bundled .caf file cleanly and respects
+    // the hardware silent switch and Focus modes.
+    if (!Platform.isIOS || isSoundOnly) {
+      if (preferences.notificationDisplayMode !=
+              NotificationDisplayMode.hideDetails ||
+          isTestNotification) {
+        await _playNotificationTone(toneId);
+      }
+      if (Platform.isIOS && isSoundOnly) {
+        return;
+      }
     }
 
     final conversationId = payload?['conversationId']?.toString().trim();
     final shouldGroup = preferences.groupNotificationsByChat &&
         conversationId != null &&
         conversationId.isNotEmpty;
+    final iosThreadId = (shouldGroup && conversationId.isNotEmpty)
+        ? 'chat_$conversationId'
+        : null;
+    final iosSoundFile = _iosSoundFileForToneId(toneId);
+    final iosDetails = DarwinNotificationDetails(
+      presentAlert: !isSoundOnly,
+      presentBanner: !isSoundOnly,
+      presentList: !isSoundOnly,
+      presentBadge: true,
+      presentSound: !tone.isSilent && !isSoundOnly && iosSoundFile != null,
+      sound: iosSoundFile,
+      threadIdentifier: iosThreadId,
+      categoryIdentifier: isChat ? 'chat_reply_category' : null,
+      interruptionLevel: InterruptionLevel.active,
+    );
 
     final notificationId = _nextId++;
     final encodedPayload = payload == null || payload.isEmpty
@@ -405,10 +503,7 @@ class LocalNotificationService {
                 ]
               : null,
         ),
-        iOS: DarwinNotificationDetails(
-          presentSound: false,
-          threadIdentifier: 'chat_$conversationId',
-        ),
+        iOS: iosDetails,
         windows: WindowsNotificationDetails(
           audio: WindowsNotificationAudio.silent(),
         ),
@@ -422,7 +517,13 @@ class LocalNotificationService {
         payload: encodedPayload,
       );
 
-      // 2. Summary notification for this conversation (WhatsApp style inbox bundle)
+      if (Platform.isIOS) {
+        // iOS groups notifications natively via `threadIdentifier`; emitting
+        // a second summary notification on iOS creates duplicate banners.
+        return;
+      }
+
+      // 2. Summary notification for this conversation (Android inbox bundle)
       final summaryId = (conversationId.hashCode.abs() % 800000) + _summaryIdOffset;
       final summaryText = snippets.length > 1
           ? '${snippets.length} رسائل جديدة'
@@ -446,10 +547,7 @@ class LocalNotificationService {
             summaryText: summaryText,
           ),
         ),
-        iOS: DarwinNotificationDetails(
-          presentSound: false,
-          threadIdentifier: 'chat_$conversationId',
-        ),
+        iOS: iosDetails,
         windows: WindowsNotificationDetails(
           audio: WindowsNotificationAudio.silent(),
         ),
@@ -489,7 +587,7 @@ class LocalNotificationService {
                 ]
               : null,
         ),
-        iOS: const DarwinNotificationDetails(presentSound: false),
+        iOS: iosDetails,
         windows: WindowsNotificationDetails(
           audio: WindowsNotificationAudio.silent(),
         ),

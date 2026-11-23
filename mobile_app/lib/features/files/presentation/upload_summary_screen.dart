@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/share_origin.dart';
 import '../../../shared/models/pending_upload.dart';
 import '../../../shared/providers/providers.dart';
 import '../../../shared/services/remote_desktop_file_service.dart';
@@ -178,13 +179,18 @@ class _UploadSummaryScreenState extends ConsumerState<UploadSummaryScreen> {
 
   Future<void> _sharePendingFile() async {
     try {
+      final shareOrigin = resolveSharePositionOrigin(context);
       final file = File(widget.pendingUpload.filePath);
       if (await file.exists()) {
         final xFile = XFile(
           widget.pendingUpload.filePath,
           mimeType: 'application/pdf',
         );
-        await Share.shareXFiles([xFile], text: widget.pendingUpload.fileName);
+        await Share.shareXFiles(
+          [xFile],
+          text: widget.pendingUpload.fileName,
+          sharePositionOrigin: shareOrigin,
+        );
       } else {
         throw Exception('الملف غير موجود.');
       }
